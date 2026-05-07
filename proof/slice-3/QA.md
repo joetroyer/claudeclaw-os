@@ -7,7 +7,7 @@
 
 ## Status
 
-`Verdict: PENDING REVIEW`
+`Verdict: PENDING QA`
 
 ## Acceptance criteria mapped to evidence
 

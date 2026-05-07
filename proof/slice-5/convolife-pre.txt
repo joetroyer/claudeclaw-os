@@ -1,0 +1,10 @@
+=== Active session_id ===
+28809a82-6beb-465c-9181-78e7cd859887
+
+=== convolife stats ===
+0||||
+
+=== convolife baseline ===
+3|44653|7994|0.6017412|0
+---
+Note: live 'sessions' table session 28809a82-6beb-465c-9181-78e7cd859887 has 0 rows in token_usage; using most-recent populated session 9363cf72 to verify query parity post-change.

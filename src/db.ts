@@ -2016,6 +2016,34 @@ export function getSessionConversation(sessionId: string, limit = 40): Conversat
     .all(sessionId, limit) as ConversationTurn[];
 }
 
+/** Slice 3 — Org Chart workload counts (read-only).
+ *
+ *  Returns mission_tasks (rows assigned to this agent created at or
+ *  after `sinceSec`) and active scheduled_tasks owned by the agent.
+ *  Used exclusively by the org-chart Analytics tab — no writes, no
+ *  side effects. Both counts default to 0 if the agent id has no
+ *  matching rows.
+ *
+ *  `sinceSec` is seconds-since-epoch. Pass 0 for all-time. */
+export function getAgentWorkloadCounts(
+  agentId: string,
+  sinceSec: number,
+): { missionTasks: number; scheduledTasks: number } {
+  const m = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM mission_tasks
+       WHERE assigned_agent = ? AND created_at >= ?`,
+    )
+    .get(agentId, sinceSec) as { n: number } | undefined;
+  const s = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM scheduled_tasks
+       WHERE agent_id = ? AND status = 'active'`,
+    )
+    .get(agentId) as { n: number } | undefined;
+  return { missionTasks: m?.n ?? 0, scheduledTasks: s?.n ?? 0 };
+}
+
 export function getAgentTokenStats(agentId: string): { todayCost: number; todayTurns: number; allTimeCost: number } {
   const today = db
     .prepare(

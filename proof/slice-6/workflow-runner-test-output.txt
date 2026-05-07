@@ -1,0 +1,21 @@
+
+> claudeclaw@1.1.0 test
+> vitest run src/workflow-runner.test.ts
+
+
+ RUN  v2.1.9 /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a82fcff2d8385a787
+
+ ✓ src/workflow-runner.test.ts (29 tests) 3ms
+[19:51:33.682] [33mWARN[39m (17195): [36mSlice 6 PreToolUse hook blocked edit[39m
+    [35mtool[39m: "Edit"
+    [35mtarget[39m: "/Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a82fcff2d8385a787/src/db.ts"
+    [35mallowedPaths[39m: [
+      "memory/",
+      "tasks.md"
+    ]
+
+ Test Files  1 passed (1)
+      Tests  29 passed (29)
+   Start at  19:51:33
+   Duration  388ms (transform 84ms, setup 7ms, collect 170ms, tests 3ms, environment 0ms, prepare 45ms)
+

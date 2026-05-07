@@ -1,0 +1,37 @@
+=== launchctl agent count ===
+       8
+=== mission_tasks count ===
+4
+=== watchers in watchers.yaml ===
+8
+=== watcher names ===
+wa-daemon-health
+tunnel-health
+bot-fatal
+warroom-voice-health
+stuck-mission-tasks
+meet-session-stale-cleanup
+incoming-whatsapp-vip
+trading-monitor-trigger
+=== claude_md hashes ===
+agents/_template/CLAUDE.md 0116d57cc90ee3ba46d2691612b930ce8018196a1b0d1d93e778e2d92889afaf
+agents/clawds/CLAUDE.md 241b26c70c139bcd0776e1b619b4c096d89fafc5a6484333d5d70742960310cf
+agents/comms/CLAUDE.md 0e6430cb83ae92c43f40df4007e91b2882a2887c86586dc9e2f5546decf86dea
+agents/content/CLAUDE.md 5af8c5d2232b6e7d58f43fcdfc60d41c2e225bee294851e41259fd207612027b
+agents/goldbot-labs/CLAUDE.md 2d462c803eff1ccc83ccbb3c44f981f399afada8bd13ad2bd803dd1b25334a97
+agents/meta/CLAUDE.md b8805d157c891d1f3373c69bef4de4dbcd77c9955d8ec91789095f13c5c5ea7c
+agents/ops/CLAUDE.md 9e1b1fbe201d168143d6ec1f9c15bbff4be5db509fc21645f407f22ebebe9c97
+agents/research/CLAUDE.md 633b7eb02eed61a893adf29c3d8ab554030d9162e58380a4789538d90cb8d0bf
+agents/trading-monitor/CLAUDE.md 3577c63c5c0988b464e1ac1c82efe50010c82cd3b1ee16066847eae614ecdb84
+=== existing tables ===
+agent_file_history    memories_fts          slack_messages      
+agent_suggestions     memories_fts_config   token_usage         
+audit_log             memories_fts_data     wa_message_map      
+compaction_events     memories_fts_docsize  wa_messages         
+consolidations        memories_fts_idx      wa_outbox           
+conversation_log      mission_tasks         warroom_meetings    
+dashboard_settings    scheduled_tasks       warroom_transcript  
+hive_mind             session_summaries     webhook_payloads    
+inter_agent_tasks     sessions              workflow_runs       
+meet_sessions         skill_health          workflow_stages     
+memories              skill_usage         

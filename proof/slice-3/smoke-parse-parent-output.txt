@@ -1,0 +1,32 @@
+=== lobs.yaml ===
+  count: 4
+  - agency       Agency (2 projects)
+  - goldbot      Gold Bot (2 projects)
+  - course       Course Business (2 projects)
+  - personal     Personal (2 projects)
+
+=== humans.yaml ===
+  count: 2
+  - joe      Joe (owns 4 LOBs, 0 projects)
+  - ali      Ali (owns 1 LOBs, 0 projects)
+
+=== agents (merged) ===
+  count: 8
+  - clawds         lob=<unset>    ideal=false results=0 owns_total=0
+  - comms          lob=<unset>    ideal=false results=0 owns_total=0
+  - content        lob=<unset>    ideal=false results=0 owns_total=0
+  - goldbot-labs   lob=<unset>    ideal=false results=0 owns_total=0
+  - meta           lob=<unset>    ideal=false results=0 owns_total=0
+  - ops            lob=<unset>    ideal=false results=0 owns_total=0
+  - research       lob=<unset>    ideal=false results=0 owns_total=0
+  - trading-monitor lob=trading    ideal=false results=3 owns_total=2
+
+=== decorateWorkload (synthetic counts) ===
+  rows: 8
+  overloaded: 4
+    - comms: total=25 suggested="Comms is carrying 25 tasks in the last 30d (threshold 20). C..."
+    - goldbot-labs: total=25 suggested="Gold Bot Labs is carrying 25 tasks in the last 30d (threshol..."
+    - ops: total=25 suggested="Ops is carrying 25 tasks in the last 30d (threshold 20). Con..."
+    - trading-monitor: total=25 suggested="Trading Monitor is carrying 25 tasks in the last 30d (thresh..."
+
+DONE

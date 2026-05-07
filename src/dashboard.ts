@@ -54,6 +54,7 @@ import {
   getDashboardSetting,
   setDashboardSetting,
   insertAuditLog,
+  getAgentWorkloadCounts,
   appendAgentFileHistory,
   listAgentFileHistory,
   getAgentFileHistory,
@@ -69,6 +70,15 @@ import { computeNextRun } from './scheduler.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
 import { getSecurityStatus } from './security.js';
 import { AGENT_ID_RE, agentExists, listAgentIds, loadAgentConfig, resolveAgentDir, setAgentModel } from './agent-config.js';
+import {
+  readLobs,
+  readHumans,
+  readOrgAgents,
+  decorateWorkload,
+  DEFAULT_WINDOW_DAYS,
+  DEFAULT_OVERLOAD_THRESHOLD,
+  type WorkloadCounts,
+} from './org-chart.js';
 import {
   resolveAgentAvatar,
   avatarEtag,
@@ -2708,6 +2718,38 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     } catch (err) {
       return c.json({ error: 'failed to delete avatar' }, 500);
     }
+  });
+
+  // ── Org chart (Slice 3, read-only) ──────────────────────────────────
+  // Pure consumers. Never mutate agent.yaml, lobs.yaml, humans.yaml, or
+  // any DB row. The whole feature is opt-in: missing config files yield
+  // empty arrays so the page renders a "nothing here yet" state instead
+  // of 500ing.
+
+  app.get('/api/org-chart/lobs', (c) => {
+    return c.json({ lobs: readLobs() });
+  });
+
+  app.get('/api/org-chart/humans', (c) => {
+    return c.json({ humans: readHumans() });
+  });
+
+  app.get('/api/org-chart/agents', (c) => {
+    return c.json({ agents: readOrgAgents() });
+  });
+
+  app.get('/api/org-chart/workload', (c) => {
+    const days = Math.max(1, Math.min(365, parseInt(c.req.query('days') || String(DEFAULT_WINDOW_DAYS), 10) || DEFAULT_WINDOW_DAYS));
+    const threshold = Math.max(1, parseInt(c.req.query('threshold') || String(DEFAULT_OVERLOAD_THRESHOLD), 10) || DEFAULT_OVERLOAD_THRESHOLD);
+    const sinceSec = Math.floor(Date.now() / 1000) - days * 24 * 60 * 60;
+
+    const agents = readOrgAgents();
+    const counts = new Map<string, WorkloadCounts>();
+    for (const a of agents) {
+      counts.set(a.id, getAgentWorkloadCounts(a.id, sinceSec));
+    }
+    const workload = decorateWorkload(agents, counts, days, threshold);
+    return c.json({ window_days: days, overload_threshold: threshold, workload });
   });
 
   // ── Dashboard personalization ────────────────────────────────────────

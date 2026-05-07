@@ -1,0 +1,20 @@
+=== lobs.yaml ===
+  count: 4
+  - agency       Agency (2 projects)
+  - goldbot      Gold Bot (2 projects)
+  - course       Course Business (2 projects)
+  - personal     Personal (2 projects)
+
+=== humans.yaml ===
+  count: 2
+  - joe      Joe (owns 4 LOBs, 0 projects)
+  - ali      Ali (owns 1 LOBs, 0 projects)
+
+=== agents (merged) ===
+  count: 0
+
+=== decorateWorkload (synthetic counts) ===
+  rows: 0
+  overloaded: 0
+
+DONE

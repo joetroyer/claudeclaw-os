@@ -1,0 +1,28 @@
+# Humans on the org chart — alongside agents, these are the named
+# people whose ownership shows up in Slice 3's hierarchy view.
+#
+# Read-only at runtime. The org chart's drawer surfaces a human's
+# `owns_lobs` and `owns_projects` next to assigned agents. Slugs must
+# match `lobs.yaml`.
+#
+# Seed: Joe (founder/operator) and Ali (per the spec's mention of
+# "Joe, Ali, etc., with their owned domains"). Add more by appending
+# entries — the org chart re-reads on every API hit, no migration.
+
+humans:
+  - id: joe
+    name: Joe
+    role: Founder / operator
+    owns_lobs:
+      - agency
+      - goldbot
+      - course
+      - personal
+    owns_projects: []
+
+  - id: ali
+    name: Ali
+    role: Operator
+    owns_lobs:
+      - agency
+    owns_projects: []

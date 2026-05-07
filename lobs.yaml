@@ -1,0 +1,47 @@
+# Lines of Business — top of the org chart hierarchy.
+#
+# Slice 3 (agentic-os-spec-vision5-7-2026.md) reads this file via the
+# /api/org-chart/lobs endpoint. Read-only at runtime. Agents reference
+# these by `slug` in their `lob:` field; humans reference them by slug
+# in `humans.yaml` under `owns_lobs:` / `owns_projects:`.
+#
+# Seeded from the spec's enumeration: agency, goldbot, course business,
+# personal. Edit names / projects freely — the org chart picks up any
+# changes on the next dashboard reload (no restart required).
+
+lobs:
+  - slug: agency
+    name: Agency
+    description: Client services — paid media, deliverability, ad ops.
+    projects:
+      - slug: client-google-ads
+        name: Google Ads management
+      - slug: client-deliverability
+        name: Email deliverability work
+
+  - slug: goldbot
+    name: Gold Bot
+    description: XAUUSD trading bot, signal evaluation, lab research.
+    projects:
+      - slug: goldbot-live
+        name: Live signal pipeline
+      - slug: goldbot-labs
+        name: Backtest lab + scenario research
+
+  - slug: course
+    name: Course Business
+    description: Educational content, YouTube, community, course launches.
+    projects:
+      - slug: youtube
+        name: YouTube channel
+      - slug: course-launch
+        name: Course launches and updates
+
+  - slug: personal
+    name: Personal
+    description: Joe's personal ops — calendar, todos, memory, household.
+    projects:
+      - slug: personal-ops
+        name: Day-to-day operations
+      - slug: personal-research
+        name: Personal research and learning

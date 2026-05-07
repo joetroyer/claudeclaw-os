@@ -13,10 +13,3 @@ agents/goldbot-labs/CLAUDE.md 2d462c803eff1ccc83ccbb3c44f981f399afada8bd13ad2bd8
 agents/meta/CLAUDE.md b8805d157c891d1f3373c69bef4de4dbcd77c9955d8ec91789095f13c5c5ea7c
 agents/ops/CLAUDE.md 9e1b1fbe201d168143d6ec1f9c15bbff4be5db509fc21645f407f22ebebe9c97
 agents/research/CLAUDE.md 633b7eb02eed61a893adf29c3d8ab554030d9162e58380a4789538d90cb8d0bf
-
-=== Note ===
-Migration was run only against the worktree's agents/*/agent.yaml.example files.
-Production agent.yaml files in /Volumes/4TB-990/dev/claude-clawos/agents/ are untouched
-(they are gitignored and only exist outside the worktree). Apply the migration
-to production via 'tsx scripts/migrate-agent-schema.ts <production-agents-dir>'
-after review/QA approval.

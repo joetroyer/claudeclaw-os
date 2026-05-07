@@ -3,6 +3,7 @@ import {
   Brain, Network, Activity, ShieldCheck,
   Swords,
   Settings,
+  Webhook,
 } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
 
@@ -22,6 +23,7 @@ export interface RouteDef {
 export const ROUTES: RouteDef[] = [
   { path: '/mission',    label: 'Mission Control', section: 'workspace',    icon: LayoutGrid,    shortcut: 'g m' },
   { path: '/scheduled',  label: 'Scheduled',       section: 'workspace',    icon: ListTodo,      shortcut: 'g s' },
+  { path: '/triggered',  label: 'Triggered',       section: 'workspace',    icon: Webhook,       shortcut: 'g t' },
   { path: '/agents',     label: 'Agents',          section: 'workspace',    icon: Users,         shortcut: 'g a' },
   { path: '/chat',       label: 'Chat',            section: 'workspace',    icon: MessageSquare, shortcut: 'g c' },
 

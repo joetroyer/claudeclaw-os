@@ -10,6 +10,7 @@ import { Memories } from '@/pages/Memories';
 import { HiveMind } from '@/pages/HiveMind';
 import { Agents } from '@/pages/Agents';
 import { Scheduled } from '@/pages/Scheduled';
+import { Triggered } from '@/pages/Triggered';
 import { Audit } from '@/pages/Audit';
 import { Usage } from '@/pages/Usage';
 import { Settings } from '@/pages/Settings';
@@ -47,6 +48,8 @@ export function App() {
         <Switch>
           <Route path="/mission"><MissionControl /></Route>
           <Route path="/scheduled"><Scheduled /></Route>
+          <Route path="/triggered"><Triggered /></Route>
+          <Route path="/triggered/:slug"><Triggered /></Route>
           <Route path="/agents"><Agents /></Route>
           <Route path="/agents/:id/files"><AgentFiles /></Route>
           <Route path="/chat"><Chat /></Route>

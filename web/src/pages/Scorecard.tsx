@@ -140,7 +140,6 @@ export function Scorecard({ initialView = 'scorecard' }: { initialView?: View } 
             title={selectedLob ? `By project — filtered to ${selectedLob}` : 'By project'}
             groups={filteredProjects}
             selected={null}
-            onSelect={() => { /* projects aren't selectable */ }}
           />
         </div>
       )}
@@ -274,7 +273,7 @@ function BudgetSection({
   title: string;
   groups: BudgetGroup[];
   selected: string | null;
-  onSelect: (key: string | null) => void;
+  onSelect?: (key: string | null) => void;
 }) {
   if (groups.length === 0) {
     return (
@@ -296,13 +295,13 @@ function BudgetSection({
       <div class="grid gap-2 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
         {groups.map((g) => {
           const isSelected = selected === g.key;
-          const clickable = onSelect && (selected !== null || groups.length > 1);
+          const clickable = !!onSelect;
           return (
             <button
               key={g.key}
               type="button"
               onClick={clickable
-                ? () => onSelect(isSelected ? null : g.key)
+                ? () => onSelect!(isSelected ? null : g.key)
                 : undefined}
               class={
                 'text-left bg-[var(--color-card)] border rounded-lg p-3 transition-colors ' +

@@ -1,16 +1,9 @@
 === Slice 3 Data-Integrity Proof ===
-Captured: 2026-05-07T23:30:00Z
+Captured: 2026-05-07T23:45:00Z
 
 Worktree:        /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a8df5c79d9d35ae09
-Worktree HEAD:   76096f0  (fix(slice-3): lob handling for empty/unmapped agents)
+Worktree HEAD:   adc3d72  (chore(slice-3): refresh proof artifacts to current HEAD)
 Worktree branch: worktree-agent-a8df5c79d9d35ae09
-
-Slice 3 commits (main..HEAD):
-  76096f0 fix(slice-3): lob handling for empty/unmapped agents
-  ea3465b test(slice-3): proof artifacts — playwright spec, smoke scripts, integrity proofs
-  d27c0da feat(slice-3): OrgChart page with Hierarchy / Analytics / Ideal-vs-Active tabs
-  6b3d49e feat(slice-3): org-chart server module + read-only API endpoints
-  b3e39ae feat(slice-3): seed lobs.yaml + humans.yaml for org-chart hierarchy
 
 # Slice 3 contract: read-only consumer. The implementation adds new
 # top-level config files (lobs.yaml, humans.yaml), a server module
@@ -22,6 +15,17 @@ Slice 3 commits (main..HEAD):
 # by design — slice 3 is read-only, so the BEFORE and AFTER snapshots
 # of every invariant must match. `diff data-integrity-pre.txt
 # data-integrity-post.txt` produces zero output.
+#
+# NOTE on the commit list: previous revisions of this proof embedded
+# the output of `git log --oneline main..HEAD` here. That created a
+# chicken-and-egg: any commit that *regenerated* the proof made the
+# embedded list stale by exactly one commit (itself). The list lives
+# in `git log` already and does not belong inside the proof. To make
+# the proof bit-identical pre/post by construction (and future-proof
+# against further regenerations), the commit list section has been
+# removed. To inspect Slice 3 commits, run:
+#   git log --oneline main..HEAD
+# from the worktree.
 
 === Invariant 1: agents/ paths touched by this slice's commits ===
 # Output of `git diff main..HEAD -- agents/` is empty — none of this

@@ -1,0 +1,37 @@
+Runtime verification of the 3 fix commits, executed from main thread because the Codex sandbox blocks `tsx` execution with EPERM (environmental, not a code defect).
+
+=== Finding 1: data-integrity diff (expect empty) ===
+$ diff proof/slice-1/data-integrity-pre.txt proof/slice-1/data-integrity-post.txt
+(empty diff — files bit-identical)
+
+=== Finding 2a: migration script with nonexistent dir ===
+$ npx tsx scripts/migrate-agent-schema.ts /tmp/does-not-exist-slice1-verify-$$
+[migrate-agent-schema] start 2026-05-07T22:19:04.202Z
+[migrate-agent-schema] agents dir: /tmp/does-not-exist-slice1-verify-42245
+[migrate-agent-schema] ERROR: Directory not found: /tmp/does-not-exist-slice1-verify-42245
+exit=1
+
+=== Finding 2b: migration script with regular file ===
+$ npx tsx scripts/migrate-agent-schema.ts package.json
+[migrate-agent-schema] start 2026-05-07T22:19:04.573Z
+[migrate-agent-schema] agents dir: <worktree>/package.json
+[migrate-agent-schema] ERROR: Not a directory: <worktree>/package.json
+exit=1
+
+=== Finding 3: verify-loader exercises real src/agent-config.ts ===
+$ npx tsx proof/slice-1/verify-loader.ts
+OK: _template
+OK: comms
+OK: content
+OK: ops
+OK: research
+ALL OK (5 agents loaded via src/agent-config.ts)
+exit=0
+
+=== Additive-only check ===
+$ git diff main -- 'agents/*/CLAUDE.md'
+(empty)
+$ git diff main -- src/agent-config.ts
+(empty)
+$ git diff main -- package.json package-lock.json
+(empty)

@@ -60,6 +60,12 @@ type Selection =
   | { kind: 'lob'; lobSlug: string }
   | { kind: 'project'; lobSlug: string; projectSlug: string };
 
+// Synthetic slug used to bucket agents whose `lob:` field is empty or
+// references a slug not present in lobs.yaml. The same slug is reused
+// at the project level for agents inside a real LOB whose `projects:`
+// list references unknown project slugs (or is empty).
+const UNASSIGNED_SLUG = '__unassigned__';
+
 // ── page ─────────────────────────────────────────────────────────────
 
 export function OrgChart() {
@@ -91,20 +97,31 @@ export function OrgChart() {
     lobs.error || humans.error || agents.error || workload.error;
 
   // Reset selection when an upstream config change makes the current
-  // pointer dangle (e.g. a LOB is renamed/removed).
+  // pointer dangle (e.g. a LOB is renamed/removed). The synthetic
+  // "Unassigned" bucket (UNASSIGNED_SLUG) is always considered valid
+  // when there are agents to populate it; the same applies to the
+  // "Unassigned" project inside a real LOB.
   useEffect(() => {
     if (selection.kind === 'lob' || selection.kind === 'project') {
+      if (selection.lobSlug === UNASSIGNED_SLUG) {
+        // Stays valid as long as there's at least one unassigned agent.
+        const hasUnassigned = agentList.some(
+          (a) => !a.lob || !lobList.some((l) => l.slug === a.lob),
+        );
+        if (!hasUnassigned) setSelection({ kind: 'root' });
+        return;
+      }
       const lob = lobList.find((l) => l.slug === selection.lobSlug);
       if (!lob) {
         setSelection({ kind: 'root' });
         return;
       }
-      if (selection.kind === 'project') {
+      if (selection.kind === 'project' && selection.projectSlug !== UNASSIGNED_SLUG) {
         const proj = lob.projects.find((p) => p.slug === selection.projectSlug);
         if (!proj) setSelection({ kind: 'lob', lobSlug: lob.slug });
       }
     }
-  }, [lobList]);
+  }, [lobList, agentList]);
 
   const drawerAgent =
     drawer?.kind === 'agent' ? agentList.find((a) => a.id === drawer.id) : null;
@@ -195,7 +212,41 @@ function HierarchyView({
   onOpenAgent: (id: string) => void;
   onOpenHuman: (id: string) => void;
 }) {
-  if (lobs.length === 0) {
+  // Build the rendered LOB list: configured LOBs + a synthetic
+  // "Unassigned" bucket whenever any agent's `lob:` is empty or
+  // references a slug that doesn't exist in lobs.yaml. This keeps the
+  // page from going blank when nobody has filled in `lob:` yet (every
+  // agent ships with `lob: ""` after Slice 1 by default).
+  const knownLobSlugs = useMemo(() => new Set(lobs.map((l) => l.slug)), [lobs]);
+  const unassignedAgents = useMemo(
+    () => agents.filter((a) => !a.lob || !knownLobSlugs.has(a.lob)),
+    [agents, knownLobSlugs],
+  );
+  const renderLobs: Lob[] = useMemo(() => {
+    if (unassignedAgents.length === 0) return lobs;
+    return [
+      ...lobs,
+      {
+        slug: UNASSIGNED_SLUG,
+        name: 'Unassigned',
+        description: 'Configure `lob:` in agent.yaml to place these on the chart.',
+        projects: [],
+      },
+    ];
+  }, [lobs, unassignedAgents]);
+
+  // Helper: list the agents that belong inside a (possibly synthetic)
+  // LOB. The unassigned bucket collects every agent whose lob is empty
+  // or unknown.
+  function agentsForLob(lobSlug: string): OrgAgent[] {
+    if (lobSlug === UNASSIGNED_SLUG) return unassignedAgents;
+    return agents.filter((a) => a.lob === lobSlug);
+  }
+
+  // No LOBs configured AND no agents at all — show the original empty
+  // state. With at least one agent, the unassigned bucket carries the
+  // page so we never hand the user a blank screen.
+  if (renderLobs.length === 0) {
     return (
       <PageState
         empty
@@ -209,16 +260,24 @@ function HierarchyView({
     return (
       <div class="flex-1 overflow-y-auto p-6">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {lobs.map((lob) => {
-            const lobAgents = agents.filter((a) => a.lob === lob.slug);
-            const lobHumans = humans.filter((h) => h.owns_lobs.includes(lob.slug));
+          {renderLobs.map((lob) => {
+            const lobAgents = agentsForLob(lob.slug);
+            const lobHumans = lob.slug === UNASSIGNED_SLUG
+              ? []
+              : humans.filter((h) => h.owns_lobs.includes(lob.slug));
+            const isUnassigned = lob.slug === UNASSIGNED_SLUG;
             return (
               <button
                 key={lob.slug}
                 type="button"
                 data-testid={`lob-card-${lob.slug}`}
                 onClick={() => onSelect({ kind: 'lob', lobSlug: lob.slug })}
-                class="text-left p-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] hover:bg-[var(--color-elevated)] transition-colors"
+                class={[
+                  'text-left p-4 rounded-lg border bg-[var(--color-card)] hover:bg-[var(--color-elevated)] transition-colors',
+                  isUnassigned
+                    ? 'border-dashed border-[var(--color-border)]'
+                    : 'border-[var(--color-border)]',
+                ].join(' ')}
               >
                 <div class="text-[14px] font-semibold text-[var(--color-text)]">{lob.name}</div>
                 {lob.description && (
@@ -240,9 +299,38 @@ function HierarchyView({
   }
 
   if (selection.kind === 'lob') {
-    const lob = lobs.find((l) => l.slug === selection.lobSlug)!;
-    const lobAgents = agents.filter((a) => a.lob === lob.slug);
-    const lobHumans = humans.filter((h) => h.owns_lobs.includes(lob.slug));
+    const lob = renderLobs.find((l) => l.slug === selection.lobSlug);
+    if (!lob) {
+      // Defensive — selection useEffect should have already reset.
+      return (
+        <PageState
+          empty
+          emptyTitle="LOB not found"
+          emptyDescription="The selected LOB is no longer in lobs.yaml."
+        />
+      );
+    }
+    const isUnassigned = lob.slug === UNASSIGNED_SLUG;
+    const lobAgents = agentsForLob(lob.slug);
+    const lobHumans = isUnassigned
+      ? []
+      : humans.filter((h) => h.owns_lobs.includes(lob.slug));
+
+    // Inside a real LOB, partition agents into known projects + an
+    // "Unassigned" project bucket for any agent whose `projects:` is
+    // empty or references slugs that don't exist on this LOB.
+    const knownProjectSlugs = new Set(lob.projects.map((p) => p.slug));
+    const projectUnassignedAgents = isUnassigned
+      ? []
+      : lobAgents.filter(
+          (a) =>
+            a.projects.length === 0 ||
+            !a.projects.some((slug) => knownProjectSlugs.has(slug)),
+        );
+    const renderProjects: LobProject[] = projectUnassignedAgents.length > 0
+      ? [...lob.projects, { slug: UNASSIGNED_SLUG, name: 'Unassigned' }]
+      : lob.projects;
+
     return (
       <div class="flex-1 overflow-y-auto p-6">
         <Breadcrumb
@@ -252,36 +340,51 @@ function HierarchyView({
         {lob.description && (
           <p class="text-[12px] text-[var(--color-text-muted)] mt-1">{lob.description}</p>
         )}
+        {isUnassigned && (
+          <p class="text-[12px] text-[var(--color-text-faint)] mt-1">
+            Agents with an empty or unrecognized <code class="text-[11px]">lob:</code> field land here. Edit each agent's <code class="text-[11px]">agent.yaml</code> to place them on the chart.
+          </p>
+        )}
 
-        <div class="mt-5">
-          <div class="text-[11px] uppercase tracking-wider text-[var(--color-text-faint)] mb-2">Projects</div>
-          {lob.projects.length === 0 ? (
-            <div class="text-[12px] text-[var(--color-text-muted)]">No projects defined for this LOB.</div>
-          ) : (
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {lob.projects.map((proj) => {
-                const projAgents = agents.filter((a) => a.lob === lob.slug && a.projects.includes(proj.slug));
-                return (
-                  <button
-                    key={proj.slug}
-                    type="button"
-                    data-testid={`project-card-${proj.slug}`}
-                    onClick={() => onSelect({ kind: 'project', lobSlug: lob.slug, projectSlug: proj.slug })}
-                    class="text-left p-3 rounded-md border border-[var(--color-border)] bg-[var(--color-card)] hover:bg-[var(--color-elevated)] transition-colors"
-                  >
-                    <div class="flex items-center gap-2">
-                      <div class="text-[13px] font-medium text-[var(--color-text)]">{proj.name}</div>
-                      <ChevronRight size={14} class="ml-auto text-[var(--color-text-faint)]" />
-                    </div>
-                    <div class="mt-1 text-[11px] text-[var(--color-text-faint)]">
-                      {projAgents.length} agent{projAgents.length === 1 ? '' : 's'}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        {!isUnassigned && (
+          <div class="mt-5">
+            <div class="text-[11px] uppercase tracking-wider text-[var(--color-text-faint)] mb-2">Projects</div>
+            {renderProjects.length === 0 ? (
+              <div class="text-[12px] text-[var(--color-text-muted)]">No projects defined for this LOB.</div>
+            ) : (
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {renderProjects.map((proj) => {
+                  const projAgents = proj.slug === UNASSIGNED_SLUG
+                    ? projectUnassignedAgents
+                    : lobAgents.filter((a) => a.projects.includes(proj.slug));
+                  const projIsUnassigned = proj.slug === UNASSIGNED_SLUG;
+                  return (
+                    <button
+                      key={proj.slug}
+                      type="button"
+                      data-testid={`project-card-${proj.slug}`}
+                      onClick={() => onSelect({ kind: 'project', lobSlug: lob.slug, projectSlug: proj.slug })}
+                      class={[
+                        'text-left p-3 rounded-md border bg-[var(--color-card)] hover:bg-[var(--color-elevated)] transition-colors',
+                        projIsUnassigned
+                          ? 'border-dashed border-[var(--color-border)]'
+                          : 'border-[var(--color-border)]',
+                      ].join(' ')}
+                    >
+                      <div class="flex items-center gap-2">
+                        <div class="text-[13px] font-medium text-[var(--color-text)]">{proj.name}</div>
+                        <ChevronRight size={14} class="ml-auto text-[var(--color-text-faint)]" />
+                      </div>
+                      <div class="mt-1 text-[11px] text-[var(--color-text-faint)]">
+                        {projAgents.length} agent{projAgents.length === 1 ? '' : 's'}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         <div class="mt-6">
           <div class="text-[11px] uppercase tracking-wider text-[var(--color-text-faint)] mb-2">All resources in {lob.name}</div>
@@ -297,12 +400,50 @@ function HierarchyView({
   }
 
   // selection.kind === 'project'
-  const lob = lobs.find((l) => l.slug === selection.lobSlug)!;
-  const proj = lob.projects.find((p) => p.slug === selection.projectSlug)!;
-  const projAgents = agents.filter((a) => a.lob === lob.slug && a.projects.includes(proj.slug));
-  const projHumans = humans.filter(
-    (h) => h.owns_lobs.includes(lob.slug) || h.owns_projects.includes(proj.slug),
-  );
+  const lob = renderLobs.find((l) => l.slug === selection.lobSlug);
+  if (!lob) {
+    return (
+      <PageState
+        empty
+        emptyTitle="LOB not found"
+        emptyDescription="The selected LOB is no longer in lobs.yaml."
+      />
+    );
+  }
+  const isUnassignedLob = lob.slug === UNASSIGNED_SLUG;
+  const isUnassignedProject = selection.projectSlug === UNASSIGNED_SLUG;
+  const proj: LobProject | undefined = isUnassignedProject
+    ? { slug: UNASSIGNED_SLUG, name: 'Unassigned' }
+    : lob.projects.find((p) => p.slug === selection.projectSlug);
+  if (!proj) {
+    return (
+      <PageState
+        empty
+        emptyTitle="Project not found"
+        emptyDescription="The selected project is no longer in lobs.yaml."
+      />
+    );
+  }
+
+  // Agents shown for this project view:
+  //   - Unassigned LOB: not reachable here (no projects), but defensive.
+  //   - Unassigned project under a real LOB: agents whose projects[]
+  //     is empty or references unknown slugs.
+  //   - Real project: agents whose projects[] includes the slug.
+  const lobAgents = agentsForLob(lob.slug);
+  const knownProjectSlugs = new Set(lob.projects.map((p) => p.slug));
+  const projAgents = isUnassignedProject
+    ? lobAgents.filter(
+        (a) =>
+          a.projects.length === 0 ||
+          !a.projects.some((slug) => knownProjectSlugs.has(slug)),
+      )
+    : lobAgents.filter((a) => a.projects.includes(proj.slug));
+  const projHumans = isUnassignedLob || isUnassignedProject
+    ? []
+    : humans.filter(
+        (h) => h.owns_lobs.includes(lob.slug) || h.owns_projects.includes(proj.slug),
+      );
   return (
     <div class="flex-1 overflow-y-auto p-6">
       <Breadcrumb
@@ -314,6 +455,11 @@ function HierarchyView({
       />
       <h2 class="text-[15px] font-semibold text-[var(--color-text)] mt-3">{proj.name}</h2>
       <div class="text-[12px] text-[var(--color-text-muted)] mt-1">In {lob.name}</div>
+      {isUnassignedProject && (
+        <p class="text-[12px] text-[var(--color-text-faint)] mt-1">
+          Agents whose <code class="text-[11px]">projects:</code> list is empty or references unknown slugs. Edit <code class="text-[11px]">agent.yaml</code> to assign them to a project on this LOB.
+        </p>
+      )}
 
       <div class="mt-5">
         <div class="text-[11px] uppercase tracking-wider text-[var(--color-text-faint)] mb-2">Assigned resources</div>

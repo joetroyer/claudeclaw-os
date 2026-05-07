@@ -57,8 +57,8 @@ export function App() {
           <Route path="/memories"><Memories /></Route>
           <Route path="/hive"><HiveMind /></Route>
           <Route path="/usage"><Usage /></Route>
-          <Route path="/scorecard"><Scorecard /></Route>
-          <Route path="/budget"><Scorecard /></Route>
+          <Route path="/scorecard"><Scorecard initialView="scorecard" /></Route>
+          <Route path="/budget"><Scorecard initialView="budget" /></Route>
           <Route path="/audit"><Audit /></Route>
           <Route path="/warroom"><WarRoom /></Route>
           <Route path="/voices"><Voices /></Route>

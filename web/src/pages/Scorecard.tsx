@@ -79,9 +79,9 @@ const WINDOW_LABELS: Record<Window, string> = {
   'all': 'all',
 };
 
-export function Scorecard() {
+export function Scorecard({ initialView = 'scorecard' }: { initialView?: View } = {}) {
   const [window, setWindow] = useState<Window>('30d');
-  const [view, setView] = useState<View>('scorecard');
+  const [view, setView] = useState<View>(initialView);
   const [selectedLob, setSelectedLob] = useState<string | null>(null);
 
   const sc = useFetch<ScorecardResponse>(`/api/scorecard?window=${window}`, 60_000);

@@ -1,0 +1,22 @@
+=== launchctl agent count ===
+       8
+=== mission_tasks count ===
+4
+=== token_usage count ===
+47
+=== claude_md hashes ===
+agents/_template/CLAUDE.md 0116d57cc90ee3ba46d2691612b930ce8018196a1b0d1d93e778e2d92889afaf
+agents/clawds/CLAUDE.md 241b26c70c139bcd0776e1b619b4c096d89fafc5a6484333d5d70742960310cf
+agents/comms/CLAUDE.md 0e6430cb83ae92c43f40df4007e91b2882a2887c86586dc9e2f5546decf86dea
+agents/content/CLAUDE.md 5af8c5d2232b6e7d58f43fcdfc60d41c2e225bee294851e41259fd207612027b
+agents/goldbot-labs/CLAUDE.md 2d462c803eff1ccc83ccbb3c44f981f399afada8bd13ad2bd803dd1b25334a97
+agents/meta/CLAUDE.md b8805d157c891d1f3373c69bef4de4dbcd77c9955d8ec91789095f13c5c5ea7c
+agents/ops/CLAUDE.md 9e1b1fbe201d168143d6ec1f9c15bbff4be5db509fc21645f407f22ebebe9c97
+agents/research/CLAUDE.md 633b7eb02eed61a893adf29c3d8ab554030d9162e58380a4789538d90cb8d0bf
+
+=== Note ===
+Migration was run only against the worktree's agents/*/agent.yaml.example files.
+Production agent.yaml files in /Volumes/4TB-990/dev/claude-clawos/agents/ are untouched
+(they are gitignored and only exist outside the worktree). Apply the migration
+to production via 'tsx scripts/migrate-agent-schema.ts <production-agents-dir>'
+after review/QA approval.

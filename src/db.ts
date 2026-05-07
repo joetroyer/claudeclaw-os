@@ -407,6 +407,49 @@ function createSchema(database: Database.Database): void {
       total_cost  REAL NOT NULL DEFAULT 0,
       created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
     );
+
+    -- Slice 6: Multi-Agent Workflows ────────────────────────────────────
+    -- workflow_runs is the per-invocation row for a workflow definition.
+    -- Each run owns N stages; stages spawn mission_tasks (existing table)
+    -- by id with no schema change to mission_tasks. payload_json stores
+    -- the originating prompt + accumulated outputs threaded between
+    -- stages so this table is the single source of truth for replay.
+    CREATE TABLE IF NOT EXISTS workflow_runs (
+      id              TEXT PRIMARY KEY,
+      workflow_slug   TEXT NOT NULL,
+      current_stage   INTEGER NOT NULL DEFAULT 0,
+      state           TEXT NOT NULL DEFAULT 'queued',
+      started_at      INTEGER NOT NULL,
+      finished_at     INTEGER,
+      payload_json    TEXT NOT NULL DEFAULT '{}',
+      created_by      TEXT NOT NULL DEFAULT 'cli'
+    );
+    CREATE INDEX IF NOT EXISTS idx_workflow_runs_state
+      ON workflow_runs(state, started_at DESC);
+
+    -- workflow_stages is one row per (run, stage_idx, agent). Sequential
+    -- stages produce one row; council stages produce N rows (one per
+    -- council member) all sharing the same stage_idx. mission_task_id is
+    -- nullable until the stage is spawned so the row can exist in the
+    -- 'queued' phase before its mission_task uuid is created.
+    CREATE TABLE IF NOT EXISTS workflow_stages (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id          TEXT NOT NULL,
+      stage_idx       INTEGER NOT NULL,
+      stage_type      TEXT NOT NULL DEFAULT 'sequential',
+      agent_id        TEXT NOT NULL,
+      mission_task_id TEXT,
+      verdict         TEXT,
+      output          TEXT,
+      attempt         INTEGER NOT NULL DEFAULT 1,
+      started_at      INTEGER,
+      finished_at     INTEGER,
+      FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_workflow_stages_run
+      ON workflow_stages(run_id, stage_idx);
+    CREATE INDEX IF NOT EXISTS idx_workflow_stages_mission
+      ON workflow_stages(mission_task_id);
   `);
 }
 
@@ -2296,6 +2339,161 @@ export function resetStuckMissionTasks(agentId: string): number {
     `UPDATE mission_tasks SET status = 'queued', started_at = NULL WHERE status = 'running' AND assigned_agent = ?`,
   ).run(agentId);
   return result.changes;
+}
+
+// ── Workflow Runs / Stages (Slice 6) ────────────────────────────────
+// New tables only. mission_tasks schema is untouched. workflow_stages
+// reference mission_tasks by id (FK by convention only — no SQL FK,
+// because mission_tasks rows can be deleted by cleanupOldMissionTasks
+// and we don't want stage rows to cascade away with them).
+
+export type WorkflowState =
+  | 'queued'
+  | 'running'
+  | 'approved'
+  | 'escalated'
+  | 'done'
+  | 'failed';
+
+export interface WorkflowRunRow {
+  id: string;
+  workflow_slug: string;
+  current_stage: number;
+  state: WorkflowState;
+  started_at: number;
+  finished_at: number | null;
+  payload_json: string;
+  created_by: string;
+}
+
+export interface WorkflowStageRow {
+  id: number;
+  run_id: string;
+  stage_idx: number;
+  stage_type: 'sequential' | 'council';
+  agent_id: string;
+  mission_task_id: string | null;
+  verdict: string | null;
+  output: string | null;
+  attempt: number;
+  started_at: number | null;
+  finished_at: number | null;
+}
+
+export function createWorkflowRun(
+  id: string,
+  workflowSlug: string,
+  payloadJson: string,
+  createdBy: string = 'cli',
+): void {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(
+    `INSERT INTO workflow_runs (id, workflow_slug, current_stage, state, started_at, payload_json, created_by)
+     VALUES (?, ?, 0, 'queued', ?, ?, ?)`,
+  ).run(id, workflowSlug, now, payloadJson, createdBy);
+}
+
+export function getWorkflowRun(id: string): WorkflowRunRow | null {
+  return (db.prepare(`SELECT * FROM workflow_runs WHERE id = ?`).get(id) as
+    | WorkflowRunRow
+    | undefined) ?? null;
+}
+
+export function listWorkflowRuns(limit = 50): WorkflowRunRow[] {
+  return db
+    .prepare(`SELECT * FROM workflow_runs ORDER BY started_at DESC LIMIT ?`)
+    .all(limit) as WorkflowRunRow[];
+}
+
+export function listActiveWorkflowRuns(): WorkflowRunRow[] {
+  return db
+    .prepare(
+      `SELECT * FROM workflow_runs WHERE state IN ('queued', 'running') ORDER BY started_at ASC`,
+    )
+    .all() as WorkflowRunRow[];
+}
+
+export function updateWorkflowRunState(
+  id: string,
+  state: WorkflowState,
+  payloadJson?: string,
+  currentStage?: number,
+): void {
+  const sets: string[] = ['state = ?'];
+  const args: unknown[] = [state];
+  if (typeof payloadJson === 'string') {
+    sets.push('payload_json = ?');
+    args.push(payloadJson);
+  }
+  if (typeof currentStage === 'number') {
+    sets.push('current_stage = ?');
+    args.push(currentStage);
+  }
+  if (state === 'done' || state === 'failed' || state === 'approved' || state === 'escalated') {
+    sets.push('finished_at = ?');
+    args.push(Math.floor(Date.now() / 1000));
+  }
+  args.push(id);
+  db.prepare(`UPDATE workflow_runs SET ${sets.join(', ')} WHERE id = ?`).run(...(args as never[]));
+}
+
+export function createWorkflowStage(
+  runId: string,
+  stageIdx: number,
+  stageType: 'sequential' | 'council',
+  agentId: string,
+  attempt = 1,
+): number {
+  const now = Math.floor(Date.now() / 1000);
+  const res = db.prepare(
+    `INSERT INTO workflow_stages (run_id, stage_idx, stage_type, agent_id, attempt, started_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(runId, stageIdx, stageType, agentId, attempt, now);
+  return Number(res.lastInsertRowid);
+}
+
+export function setWorkflowStageMissionTask(
+  stageRowId: number,
+  missionTaskId: string,
+): void {
+  db.prepare(
+    `UPDATE workflow_stages SET mission_task_id = ? WHERE id = ?`,
+  ).run(missionTaskId, stageRowId);
+}
+
+export function completeWorkflowStage(
+  stageRowId: number,
+  verdict: string,
+  output: string | null,
+): void {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(
+    `UPDATE workflow_stages SET verdict = ?, output = ?, finished_at = ? WHERE id = ?`,
+  ).run(verdict, output, now, stageRowId);
+}
+
+export function getWorkflowStages(runId: string): WorkflowStageRow[] {
+  return db
+    .prepare(
+      `SELECT * FROM workflow_stages WHERE run_id = ? ORDER BY stage_idx ASC, id ASC`,
+    )
+    .all(runId) as WorkflowStageRow[];
+}
+
+export function getWorkflowStagesByMissionTask(
+  missionTaskId: string,
+): WorkflowStageRow[] {
+  return db
+    .prepare(`SELECT * FROM workflow_stages WHERE mission_task_id = ?`)
+    .all(missionTaskId) as WorkflowStageRow[];
+}
+
+/** Returns true iff this mission_task id was spawned by a workflow stage. */
+export function isWorkflowMissionTask(missionTaskId: string): boolean {
+  const row = db
+    .prepare(`SELECT 1 FROM workflow_stages WHERE mission_task_id = ? LIMIT 1`)
+    .get(missionTaskId) as { 1?: number } | undefined;
+  return !!row;
 }
 
 // ── Meet Sessions (Pika video meeting skill) ────────────────────────

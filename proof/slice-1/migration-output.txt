@@ -113,3 +113,22 @@ skills:
 
 # Slice 1: avatar path or URL. Populated by Slice 7 persona generator.
 avatar: ""
+
+=== Graceful error: nonexistent target directory ===
+(reviewer asked the script not to crash with a stack trace when pointed
+ at a path that doesn't exist; verifies clean stderr message + exit 1)
+
+$ tsx scripts/migrate-agent-schema.ts /tmp/does-not-exist-slice1-test
+[migrate-agent-schema] start 2026-05-07T22:13:29.041Z
+[migrate-agent-schema] agents dir: /tmp/does-not-exist-slice1-test
+[migrate-agent-schema] ERROR: Directory not found: /tmp/does-not-exist-slice1-test
+EXIT: 1
+
+=== Graceful error: target is a file, not a directory ===
+
+$ touch /tmp/slice1-not-a-dir-test.txt
+$ tsx scripts/migrate-agent-schema.ts /tmp/slice1-not-a-dir-test.txt
+[migrate-agent-schema] start 2026-05-07T22:13:29.150Z
+[migrate-agent-schema] agents dir: /tmp/slice1-not-a-dir-test.txt
+[migrate-agent-schema] ERROR: Not a directory: /tmp/slice1-not-a-dir-test.txt
+EXIT: 1

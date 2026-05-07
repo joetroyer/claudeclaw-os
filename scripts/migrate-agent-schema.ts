@@ -200,6 +200,10 @@ function migrateFile(filePath: string, dryRun: boolean): FileResult {
 }
 
 function findYamlFiles(agentsDir: string): string[] {
+  // Caller (`main`) handles the missing-dir / not-a-dir cases up front so
+  // it can emit a friendly error and exit non-zero without a stack trace.
+  // We still defensively re-check here so direct callers don't stat a
+  // bogus path.
   if (!fs.existsSync(agentsDir)) {
     throw new Error(`agents directory not found: ${agentsDir}`);
   }
@@ -216,12 +220,42 @@ function findYamlFiles(agentsDir: string): string[] {
   return out.sort();
 }
 
+/** Validate that the requested target is a real directory. Returns null on
+ *  success, or a short user-facing error string on failure. Used by `main`
+ *  so a bad CLI argument exits cleanly with a non-zero status instead of
+ *  blowing up with an uncaught exception + stack trace. */
+function validateTargetDir(dir: string): string | null {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(dir);
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (e && e.code === 'ENOENT') {
+      return `Directory not found: ${dir}`;
+    }
+    if (e && e.code === 'EACCES') {
+      return `Permission denied reading directory: ${dir}`;
+    }
+    return `Cannot access directory: ${dir} (${(err as Error).message})`;
+  }
+  if (!stat.isDirectory()) {
+    return `Not a directory: ${dir}`;
+  }
+  return null;
+}
+
 function main() {
   const args = parseArgs(process.argv);
   const ts = new Date().toISOString();
   console.log(`[migrate-agent-schema] start ${ts}`);
   console.log(`[migrate-agent-schema] agents dir: ${args.dir}`);
   if (args.dryRun) console.log(`[migrate-agent-schema] dry-run: no files will be written`);
+
+  const dirError = validateTargetDir(args.dir);
+  if (dirError) {
+    console.error(`[migrate-agent-schema] ERROR: ${dirError}`);
+    process.exit(1);
+  }
 
   const files = findYamlFiles(args.dir);
   if (files.length === 0) {
@@ -256,4 +290,12 @@ function main() {
   console.log(`[migrate-agent-schema] done ${new Date().toISOString()}`);
 }
 
-main();
+try {
+  main();
+} catch (err) {
+  // Last-resort guard: any uncaught throw (e.g. from `findYamlFiles` if
+  // the dir disappears mid-run) prints a clean message and exits non-zero
+  // instead of dumping a stack trace.
+  console.error(`[migrate-agent-schema] ERROR: ${(err as Error).message}`);
+  process.exit(1);
+}

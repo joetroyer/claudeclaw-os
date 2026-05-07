@@ -1,0 +1,19 @@
+[migrate-agent-schema] start 2026-05-07T22:22:08.849Z
+[migrate-agent-schema] agents dir: /Volumes/4TB-990/dev/claude-clawos/agents
+  wrote _template/agent.yaml.example  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote clawds/agent.yaml  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote comms/agent.yaml  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote comms/agent.yaml.example  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote content/agent.yaml  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote content/agent.yaml.example  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote goldbot-labs/agent.yaml  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote meta/agent.yaml  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote ops/agent.yaml  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote ops/agent.yaml.example  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote research/agent.yaml  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote research/agent.yaml.example  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+
+[migrate-agent-schema] files scanned:  12
+[migrate-agent-schema] files migrated: 12
+[migrate-agent-schema] already up-to-date: 0
+[migrate-agent-schema] done 2026-05-07T22:22:08.855Z

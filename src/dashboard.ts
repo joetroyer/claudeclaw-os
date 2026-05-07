@@ -338,9 +338,12 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       }
     }
 
-    // run + test require a valid signature. preview lets unsigned through
-    // for shape inspection but logs signature_valid=0.
-    if ((mode === 'run' || mode === 'test') && !signatureValid) {
+    // HMAC required uniformly across all 3 modes (test/preview/run).
+    // The webhook ingress is a public surface — letting preview accept
+    // unsigned requests would let an attacker fill the payload log and
+    // probe what slugs are wired without ever providing a secret. The
+    // integration plan is unambiguous: HMAC required, public surface.
+    if (!signatureValid) {
       const reason = !secret
         ? 'secret not configured'
         : !provided

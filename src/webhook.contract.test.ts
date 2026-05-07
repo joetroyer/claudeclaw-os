@@ -153,12 +153,50 @@ describe('Slice 2 webhook ingress (POST /api/watchers/webhook/:slug)', () => {
     expect(res.status).toBe(200);
   });
 
-  it('preview mode captures payload but does NOT fire actions', async () => {
+  it('preview mode rejects unsigned requests with 401', async () => {
+    // HMAC is required uniformly across all 3 modes (test/preview/run).
+    // The webhook ingress is a public surface — letting preview accept
+    // unsigned requests would let an attacker fill the payload log and
+    // probe what slugs are wired without providing a secret.
     const body = JSON.stringify({ shape: 'inspection' });
     const res = await app.request('/api/watchers/webhook/preview-only', {
       method: 'POST',
       body,
       headers: { 'content-type': 'application/json' },
+    });
+    expect(res.status).toBe(401);
+    const j: any = await res.json();
+    expect(j.error).toBe('unauthorized');
+    expect(queueMissionSpy).not.toHaveBeenCalled();
+  });
+
+  it('preview mode rejects mis-signed requests with 401', async () => {
+    process.env.PREVIEW_SECRET = 'preview-secret';
+    const body = JSON.stringify({ shape: 'inspection' });
+    const wrongSig = sign('not-the-secret', body);
+    const res = await app.request('/api/watchers/webhook/preview-only', {
+      method: 'POST',
+      body,
+      headers: {
+        'content-type': 'application/json',
+        'x-claudeclaw-signature': 'sha256=' + wrongSig,
+      },
+    });
+    expect(res.status).toBe(401);
+    expect(queueMissionSpy).not.toHaveBeenCalled();
+  });
+
+  it('preview mode captures payload but does NOT fire actions when HMAC is valid', async () => {
+    process.env.PREVIEW_SECRET = 'preview-secret';
+    const body = JSON.stringify({ shape: 'inspection' });
+    const sig = sign('preview-secret', body);
+    const res = await app.request('/api/watchers/webhook/preview-only', {
+      method: 'POST',
+      body,
+      headers: {
+        'content-type': 'application/json',
+        'x-claudeclaw-signature': 'sha256=' + sig,
+      },
     });
     expect(res.status).toBe(200);
     const j: any = await res.json();
@@ -206,10 +244,16 @@ describe('Slice 2 webhook list + read endpoints (auth-gated)', () => {
   });
 
   it('returns last payloads for a slug', async () => {
+    process.env.PREVIEW_SECRET = 'preview-secret';
+    const body = JSON.stringify({ probe: 1 });
+    const sig = sign('preview-secret', body);
     await app.request('/api/watchers/webhook/preview-only', {
       method: 'POST',
-      body: JSON.stringify({ probe: 1 }),
-      headers: { 'content-type': 'application/json' },
+      body,
+      headers: {
+        'content-type': 'application/json',
+        'x-claudeclaw-signature': 'sha256=' + sig,
+      },
     });
     const res = await app.request(
       '/api/watchers/webhook/preview-only/payloads?token=' + TOKEN,

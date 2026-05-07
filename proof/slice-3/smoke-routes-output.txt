@@ -1,0 +1,43 @@
+GET /api/org-chart/lobs → 200
+    {"lobs":"[4 items]"}
+GET /api/org-chart/humans → 200
+    {"humans":"[2 items]"}
+GET /api/org-chart/agents → 200
+    {"agents":"[8 items]"}
+GET /api/org-chart/lobs (no token) → 401 (expected 401)
+
+registered org-chart routes:
+  GET /api/org-chart/lobs
+  GET /api/org-chart/humans
+  GET /api/org-chart/agents
+  GET /api/org-chart/workload
+
+ALL OK (only GET methods on /api/org-chart/*)
+[19:05:03.714] [32mINFO[39m (70155): [36mDashboard GET /api/org-chart/lobs 200[39m
+    [35mmethod[39m: "GET"
+    [35mpath[39m: "/api/org-chart/lobs"
+    [35mstatus[39m: 200
+    [35mip[39m: "unknown"
+    [35mua[39m: "unknown"
+    [35mms[39m: 2
+[19:05:03.716] [32mINFO[39m (70155): [36mDashboard GET /api/org-chart/humans 200[39m
+    [35mmethod[39m: "GET"
+    [35mpath[39m: "/api/org-chart/humans"
+    [35mstatus[39m: 200
+    [35mip[39m: "unknown"
+    [35mua[39m: "unknown"
+    [35mms[39m: 1
+[19:05:03.718] [32mINFO[39m (70155): [36mDashboard GET /api/org-chart/agents 200[39m
+    [35mmethod[39m: "GET"
+    [35mpath[39m: "/api/org-chart/agents"
+    [35mstatus[39m: 200
+    [35mip[39m: "unknown"
+    [35mua[39m: "unknown"
+    [35mms[39m: 2
+[19:05:03.718] [33mWARN[39m (70155): [36mDashboard GET /api/org-chart/lobs 401[39m
+    [35mmethod[39m: "GET"
+    [35mpath[39m: "/api/org-chart/lobs"
+    [35mstatus[39m: 401
+    [35mip[39m: "unknown"
+    [35mua[39m: "unknown"
+    [35mms[39m: 0

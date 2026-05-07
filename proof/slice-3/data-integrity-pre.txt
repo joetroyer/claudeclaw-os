@@ -1,0 +1,42 @@
+=== Slice 3 Data-Integrity Proof — PRE ===
+Captured: 2026-05-07T23:01:53Z
+
+Worktree:        /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a8df5c79d9d35ae09
+Worktree HEAD:   0774082  (docs(readme): cloud deployment section (Railway/Fly/Render) (#49))
+Worktree branch: worktree-agent-a8df5c79d9d35ae09
+
+# Slice 3 contract: read-only consumer. The implementation adds new
+# top-level config files (lobs.yaml, humans.yaml), a server module
+# (src/org-chart.ts), GET-only API routes in src/dashboard.ts, a new
+# web page (web/src/pages/OrgChart.tsx), and a sidebar entry. It does
+# NOT touch agents/, mission_tasks rows, or scheduled_tasks rows.
+#
+# This file captures the BEFORE state. data-integrity-post.txt shows
+# the same invariants AFTER the work is complete.
+
+=== Invariant 1: agents/ paths touched by this slice's commits ===
+# Empty output below = none of THIS slice's commits touched anything
+# under agents/. Compares <worktree-base>..HEAD.
+(if the above is empty, no agents/ paths were modified by this slice)
+
+=== Invariant 2: agents/ working-tree paths I have changed ===
+# Empty output means working tree has no edits to agents/.
+(if the above is empty, no working-tree edits to agents/)
+
+=== Invariant 3: parent-repo runtime database row counts ===
+# These are the rows the runtime read layer queries (mission_tasks,
+# scheduled_tasks). The Slice 3 read endpoints must not change them.
+  mission_tasks:   4
+  scheduled_tasks: 0
+  token_usage:     47
+
+=== Invariant 4: agents/ schema files (parent repo) ===
+# Hashes of parent-repo agent.yaml files. Must match data-integrity-post.txt.
+  8cdaffdc0a51c168319e9a3ca0e80ff7138140f732a975ff801db3280a3e5631  clawds/agent.yaml
+  49daf3993fb1a858c4a6cb166961571079fc410dab6ffe1e855c7a8154e419a0  comms/agent.yaml
+  3d942aca94d4adfff55d9225f883e8f03322c787da90e801b891b239c654c712  content/agent.yaml
+  f874266562668ec927bfbf01bc0553cf1c7a32f0d4d6d903242abde0d109b09b  goldbot-labs/agent.yaml
+  c8bb0cdd7dd58fa1d5b93f1ce88ba05de7e55d41f53aef760bc36d6c9d5a96bb  meta/agent.yaml
+  1b14226dd665caf75ce202b614dd63b089024c8c92181cac7137e584469e132e  ops/agent.yaml
+  33e6b4badae312a5924d833f515e8a3d605358dd63c9d6211f49aa942511a519  research/agent.yaml
+  286af5885e40eee208840635f6867577ae56623a6d08fe2b97e2c628e2abd8ba  trading-monitor/agent.yaml

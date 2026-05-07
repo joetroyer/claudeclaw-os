@@ -1,0 +1,41 @@
+slug: bug-hunt-council
+title: 3-Agent Bug Hunt Council
+description: |
+  Three agents independently hunt for bugs in the input target. Each
+  produces an independent verdict. Workflow advances only when majority
+  consensus is reached. Models the dual-review pattern from
+  /Volumes/4TB-990/dev/files/evidence/control-2-arch-review-2026-04-24/
+  but with three voices instead of two.
+
+default_consensus: majority
+
+allowed_paths:
+  - tasks.md
+  - memory/
+  - plans/
+  - evidence/
+  - docs/
+  - proof/
+
+stages:
+  - name: triple-bug-hunt
+    type: council
+    agents: [research, ops, meta]
+    consensus: majority
+    prompt: |
+      You are a council member in a 3-agent bug hunt. Independently
+      review the target below. Your output should be a short bullet
+      list of issues you found, then a single-line verdict.
+
+      Target:
+      {{input}}
+
+      End your response with EXACTLY one of:
+        VERDICT: APPROVED
+        VERDICT: REJECTED
+
+      "APPROVED" means: no bugs found that would block ship.
+      "REJECTED" means: at least one ship-blocking bug found.
+    on_failure:
+      retries: 0
+      escalate_to: human

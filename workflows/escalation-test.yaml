@@ -1,0 +1,35 @@
+slug: escalation-test
+title: Forced-Failure Escalation Test
+description: |
+  Single sequential stage configured to fail (the prompt asks the agent
+  to return VERDICT: REJECTED) with retries=0 so the runner immediately
+  escalates. Used for Slice 6's escalation acceptance test.
+
+default_consensus: majority
+
+allowed_paths:
+  - tasks.md
+  - memory/
+  - plans/
+  - evidence/
+  - docs/
+  - proof/
+
+stages:
+  - name: forced-fail
+    type: sequential
+    agent: ops
+    prompt: |
+      This stage is a forced-failure test. End your response with
+      EXACTLY this line:
+
+      VERDICT: REJECTED
+
+      The runner will treat REJECTED as a failure and, because
+      retries=0, will escalate to meta.
+
+      Input:
+      {{input}}
+    on_failure:
+      retries: 0
+      escalate_to: meta

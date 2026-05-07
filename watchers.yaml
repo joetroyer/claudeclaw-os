@@ -1,0 +1,142 @@
+# Watchers — declarative event-driven monitors for ClawdOS.
+#
+# Three watcher types:
+#   - log-tail:    tails a file, matches each line against `regex`
+#   - sqlite-poll: runs `sql` every `interval_sec`, fires once per row
+#   - webhook:     accepts external POSTs to /api/watchers/webhook/{slug}
+#                  with HMAC-SHA256 verification (Slice 2)
+#
+# Action types:
+#   - send-telegram:  notify the user (autonomous, safe)
+#   - queue-mission:  insert a mission_tasks row (autonomous, safe)
+#   - mark-meet-stale: cleanup helper (autonomous, safe)
+#   - run-skill:     invoke a named skill on an agent (Slice 2; dispatches
+#                    via mission_tasks under the hood)
+#
+# Destructive ops (process restarts, launchctl) are intentionally NOT here —
+# every restart is notify-only. The user runs the restart command themselves.
+
+watchers:
+  # 1. WhatsApp daemon health
+  - name: wa-daemon-health
+    type: log-tail
+    path: /Volumes/4TB-990/dev/claude-clawos/logs/wa-daemon.log
+    triggers:
+      - regex: 'disconnected|ready=false|reconnect failed|message handler error'
+        debounce_sec: 60
+        actions:
+          - send-telegram: "WhatsApp daemon issue: {match}\n\nIf it doesn't recover in ~30s, restart with:\npkill -f wa-daemon && cd /Volumes/4TB-990/dev/claude-clawos && nohup /opt/homebrew/Cellar/node@20/20.19.6/bin/node ./node_modules/.bin/tsx scripts/wa-daemon.ts > logs/wa-daemon.log 2>&1 &"
+
+  # 2. Cloudflare tunnel health
+  - name: tunnel-health
+    type: log-tail
+    path: /tmp/clawos-tunnel.log
+    triggers:
+      - regex: 'ERR Request failed|Connection refused|Connection terminated|connection lost'
+        debounce_sec: 120
+        actions:
+          - send-telegram: "Cloudflare tunnel: {match}"
+
+  # 3. Main bot crashes / fatals / subprocess errors
+  - name: bot-fatal
+    type: log-tail
+    path: /tmp/claudeclaw-main.log
+    triggers:
+      # NOTE: dropped bare "FATAL" — matched the watcher's own startup log
+      # ("watcher: bot-fatal" contains lowercase fatal, regex is case-insensitive,
+      # → self-fire). The other patterns cover real crashes.
+      - regex: 'EADDRINUSE|UnhandledPromiseRejection|uncaught exception|Bot.*crashed|subprocess_crash|subprocess crashed|process exited with code [^0]|Not logged in|Please run /login|Agent query failed|Claude Code returned an error result'
+        debounce_sec: 30
+        actions:
+          - send-telegram: "Bot trouble: {match}\n\nMain bot is hitting agent errors. If it's auth: SSH in and run `claude login` for HOME=/Users/dev. If subprocess crash: launchctl kickstart -k gui/$(id -u)/com.claudeclaw.main"
+
+  # 4. War Room voice connection failures (Pipecat / Gemini Live)
+  - name: warroom-voice-health
+    type: log-tail
+    path: /tmp/warroom-debug.log
+    triggers:
+      - regex: '1005|signaling socket closed|Connection closed unexpectedly|pipeline error'
+        debounce_sec: 60
+        actions:
+          - send-telegram: "War Room voice connection issue: {match}"
+
+  # 5. Stuck mission tasks (queued >10 min)
+  - name: stuck-mission-tasks
+    type: sqlite-poll
+    sql: |
+      SELECT id, title, assigned_agent
+      FROM mission_tasks
+      WHERE status='queued'
+        AND created_at < strftime('%s','now') - 600
+        AND id > '{cursor}'
+      ORDER BY id ASC
+      LIMIT 5
+    interval_sec: 60
+    cursor_column: id
+    actions:
+      - queue-mission:
+          agent: meta
+          title: "Stuck task triage: {title}"
+          prompt: "Mission task {id} ({title}, assigned to {assigned_agent}) has been queued for over 10 minutes. Check why it hasn't started. If the assigned agent is overloaded, reassign to a different specialist or escalate to me."
+
+  # 6. Stale "live" meet sessions (older than 2h)
+  - name: meet-session-stale-cleanup
+    type: sqlite-poll
+    sql: |
+      SELECT id, agent_id, meet_url
+      FROM meet_sessions
+      WHERE status='live'
+        AND created_at < strftime('%s','now') - 7200
+    interval_sec: 300
+    actions:
+      - mark-meet-stale: { id_field: id }
+      - send-telegram: "Auto-closed stale meet session {id} ({meet_url}) — was 'live' >2h"
+
+  # 7. New WhatsApp from a tagged contact
+  #    Filter list: edit `IN (...)` to control who triggers the comms agent.
+  - name: incoming-whatsapp-vip
+    type: sqlite-poll
+    sql: |
+      SELECT id, contact_name, body
+      FROM wa_messages
+      WHERE is_from_me=0
+        AND id > {cursor}
+        AND contact_name IN ('Sven Lepschy', 'Ryan Claudio')
+      ORDER BY id ASC
+      LIMIT 5
+    interval_sec: 30
+    cursor_column: id
+    actions:
+      - queue-mission:
+          agent: comms
+          title: "Reply to {contact_name} on WhatsApp"
+          prompt: "New WhatsApp from {contact_name}: \"{body}\"\n\nDraft a reply matching Joe's voice. If you're unsure of context or the right answer, ask Joe before sending. If it's a quick acknowledgment that obviously doesn't need approval, send via the whatsapp_send tool."
+
+  # 8. Trading signal webhook (Slice 2 smoke test).
+  #    External callers (n8n, custom listener, signal aggregator) POST signed
+  #    payloads to https://clawos.joetroyer.com/api/watchers/webhook/trading-monitor
+  #    with header `X-Claudeclaw-Signature: sha256=<hmac>` over the raw body.
+  #    See `proof/slice-2/webhook-signing-example.md` for canonical signing.
+  #
+  #    Mode lifecycle: ships as `test` (HMAC required, payload + actions
+  #    captured but tagged as test runs). Flip to `preview` to capture
+  #    payload shape only without firing actions. Flip to `run` for live.
+  - name: trading-monitor-trigger
+    type: webhook
+    slug: trading-monitor
+    secret_env: TRADING_MONITOR_SECRET
+    mode: test
+    actions:
+      - queue-mission:
+          agent: trading-monitor
+          title: "Trading signal received ({slug})"
+          prompt: |
+            A trading signal payload was received via webhook.
+
+            Mode: {mode}
+            Watcher: {watcher}
+
+            Raw payload:
+            {payload_raw}
+
+            Parse it, classify priority, log to hive_mind, and notify Joe if priority=high. Do NOT trade. Do NOT send orders.

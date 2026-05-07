@@ -3,9 +3,19 @@
  *
  * Mirrors the SDK invocation in src/agent.ts but:
  *   1. Adds an in-process `hooks: { PreToolUse }` callback that DENIES
- *      Edit/Write outside the per-stage allowed_paths set, and
- *   2. Adds `disallowedTools` so the SDK refuses to surface listed
- *      tools at all (belt-and-suspenders alongside the hook).
+ *      every write-capable tool from the stage's main thread:
+ *        - Edit / Write / MultiEdit / NotebookEdit are PATH-GATED:
+ *          allowed only if the target lives under the stage's
+ *          allowed_paths set.
+ *        - Bash is UNCONDITIONALLY BLOCKED. An orchestrating stage
+ *          has no business shelling out from its main thread; if a
+ *          stage needs to run tests/builds/grep/find, it dispatches
+ *          the work via a mission_task or sub-agent and that
+ *          sub-process owns Bash. (This closes the doer-drift gap
+ *          Codex flagged in review — `bash -c "cat > file"` could
+ *          previously bypass the Edit/Write gate entirely.)
+ *   2. Read-only tools (Read, Grep, Glob, etc.) pass through the hook
+ *      untouched so orchestrators can still inspect the workspace.
  *
  * Strictly additive: src/agent.ts is unchanged, so solo mission_tasks
  * and Telegram chat continue to use the unhooked code path.
@@ -27,7 +37,32 @@ import { getScrubbedSdkEnv } from './security.js';
 import { logger } from './logger.js';
 import { requireEnabled } from './kill-switches.js';
 
-const PROTECTED_TOOL_NAMES = ['Edit', 'Write', 'NotebookEdit'];
+/**
+ * Tools whose target path is matched against the stage's allowed_paths.
+ * Writes within an allowed prefix are permitted; writes outside are
+ * blocked. (Belt: the SDK still respects the per-spawn deny hook.)
+ */
+const PATH_GATED_TOOL_NAMES = ['Edit', 'Write', 'NotebookEdit', 'MultiEdit'];
+
+/**
+ * Tools that bypass the path gate entirely — an orchestrating workflow
+ * stage has no business shelling out (Bash) or running other
+ * write-capable side-effect tools from its main thread. Specialists run
+ * those tools via delegation: the stage SPAWNS a sub-agent / mission
+ * task and that sub-process owns Bash. This is the doer-drift fix from
+ * Codex review: the deny hook used to only intercept Edit/Write, so
+ * `bash -c "cat > file"` could exfiltrate writes around the contract.
+ */
+const ALWAYS_BLOCKED_TOOL_NAMES = ['Bash'];
+
+/** Union — any of these will trigger the PreToolUse hook callback. */
+const PROTECTED_TOOL_NAMES = [
+  ...PATH_GATED_TOOL_NAMES,
+  ...ALWAYS_BLOCKED_TOOL_NAMES,
+];
+
+/** Matcher pattern for the SDK's hooks.PreToolUse[].matcher field. */
+export const PROTECTED_TOOL_MATCHER = PROTECTED_TOOL_NAMES.join('|');
 
 export interface WorkflowSpawnOptions {
   /** Workflow stage agent slug (used to set cwd to that agent's dir). */
@@ -78,7 +113,37 @@ export function buildDenyEditHook(
     if (input.hook_event_name !== 'PreToolUse') return { continue: true };
     const toolName = input.tool_name;
     if (!PROTECTED_TOOL_NAMES.includes(toolName)) return { continue: true };
+
     const toolInput = (input.tool_input ?? {}) as Record<string, unknown>;
+
+    // Unconditional-block tools: workflow-stage main thread MUST
+    // delegate. No path gate. (See ALWAYS_BLOCKED_TOOL_NAMES doc for
+    // rationale — closes the Bash-bypass that Codex flagged in
+    // review.)
+    if (ALWAYS_BLOCKED_TOOL_NAMES.includes(toolName)) {
+      const cmdSummary =
+        (toolInput.command as string | undefined)?.slice(0, 200) ?? '';
+      const targetForLog = cmdSummary || `<${toolName}>`;
+      const reason =
+        `Slice 6 workflow stage may not invoke ${toolName} from its ` +
+        `main thread. Orchestrating stages must delegate write-capable ` +
+        `work via mission_tasks or sub-agent dispatch. ` +
+        `This is a runtime-enforced manager-only role per ` +
+        `agent-teams/big-idea.md.`;
+      blocks.push({ tool: toolName, targetPath: targetForLog, reason });
+      logger.warn({ tool: toolName, summary: cmdSummary }, 'Slice 6 PreToolUse hook blocked tool (unconditional)');
+      return {
+        decision: 'block',
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: reason,
+        },
+      };
+    }
+
+    // Path-gated tools: allow if the target is within an allowed
+    // prefix.
     const target =
       (toolInput.file_path as string | undefined) ??
       (toolInput.notebook_path as string | undefined) ??
@@ -237,7 +302,7 @@ export async function spawnWorkflowStage(
         ...(opts.abortController ? { abortController: opts.abortController } : {}),
         hooks: {
           PreToolUse: [
-            { matcher: 'Edit|Write|NotebookEdit', hooks: [hook], timeout: 5 },
+            { matcher: PROTECTED_TOOL_MATCHER, hooks: [hook], timeout: 5 },
           ],
         },
       },

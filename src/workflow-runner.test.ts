@@ -81,6 +81,16 @@ describe('Slice 6 · buildDenyEditHook', () => {
     permission_mode: 'default',
   });
 
+  // Bash takes a `command`, not a `file_path`. Mirror the real SDK
+  // shape so we exercise the unconditional-block branch correctly.
+  const mkBashInput = (command: string) => ({
+    hook_event_name: 'PreToolUse' as const,
+    tool_name: 'Bash',
+    tool_input: { command },
+    tool_use_id: 'toolu_test',
+    permission_mode: 'default',
+  });
+
   it('blocks Edit on a path outside allowed_paths', async () => {
     const blocks: any[] = [];
     const hook = buildDenyEditHook(['memory/', 'tasks.md'], blocks);
@@ -105,11 +115,31 @@ describe('Slice 6 · buildDenyEditHook', () => {
     expect((out as any).continue).toBe(true);
   });
 
-  it('does not block non-Edit/Write tools', async () => {
+  it('blocks Bash unconditionally — even with allowed_paths set', async () => {
+    const blocks: any[] = [];
+    const hook = buildDenyEditHook(['memory/', 'tasks.md', 'src/'], blocks);
+    const out = await hook(mkBashInput('echo hello > /tmp/x.txt') as any, undefined, { signal: new AbortController().signal });
+    expect((out as any).decision).toBe('block');
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].tool).toBe('Bash');
+  });
+
+  it('blocks Bash when used as a write-bypass (cat > file)', async () => {
+    const blocks: any[] = [];
+    const hook = buildDenyEditHook(['memory/'], blocks);
+    const out = await hook(mkBashInput('cat > memory/notes.md <<EOF\npayload\nEOF') as any, undefined, { signal: new AbortController().signal });
+    // Bash is blocked even when targeting a path inside allowed_paths.
+    // Allowed-path writes must go through the Edit/Write tools so the
+    // workflow runner can audit them.
+    expect((out as any).decision).toBe('block');
+    expect(blocks[0].tool).toBe('Bash');
+  });
+
+  it('blocks Bash with no allowed_paths set', async () => {
     const blocks: any[] = [];
     const hook = buildDenyEditHook([], blocks);
-    const out = await hook(mkInput('Bash', 'irrelevant') as any, undefined, { signal: new AbortController().signal });
-    expect((out as any).continue).toBe(true);
+    const out = await hook(mkBashInput('ls') as any, undefined, { signal: new AbortController().signal });
+    expect((out as any).decision).toBe('block');
   });
 
   it('blocks Write on a path outside allowed_paths', async () => {
@@ -117,5 +147,87 @@ describe('Slice 6 · buildDenyEditHook', () => {
     const hook = buildDenyEditHook(['memory/'], blocks);
     const out = await hook(mkInput('Write', path.join(PROJECT_ROOT, 'src/agent.ts')) as any, undefined, { signal: new AbortController().signal });
     expect((out as any).decision).toBe('block');
+  });
+
+  it('blocks MultiEdit on a path outside allowed_paths', async () => {
+    const blocks: any[] = [];
+    const hook = buildDenyEditHook(['memory/'], blocks);
+    const out = await hook(mkInput('MultiEdit', path.join(PROJECT_ROOT, 'src/agent.ts')) as any, undefined, { signal: new AbortController().signal });
+    expect((out as any).decision).toBe('block');
+    expect(blocks[0].tool).toBe('MultiEdit');
+  });
+
+  it('allows MultiEdit inside an allowed directory prefix', async () => {
+    const blocks: any[] = [];
+    const hook = buildDenyEditHook(['memory/'], blocks);
+    const out = await hook(mkInput('MultiEdit', path.join(PROJECT_ROOT, 'memory/notes.md')) as any, undefined, { signal: new AbortController().signal });
+    expect((out as any).continue).toBe(true);
+    expect(blocks.length).toBe(0);
+  });
+
+  it('blocks NotebookEdit outside allowed_paths via notebook_path key', async () => {
+    const blocks: any[] = [];
+    const hook = buildDenyEditHook(['memory/'], blocks);
+    const out = await hook({
+      hook_event_name: 'PreToolUse' as const,
+      tool_name: 'NotebookEdit',
+      tool_input: { notebook_path: path.join(PROJECT_ROOT, 'src/foo.ipynb') },
+      tool_use_id: 'toolu_test',
+      permission_mode: 'default',
+    } as any, undefined, { signal: new AbortController().signal });
+    expect((out as any).decision).toBe('block');
+  });
+
+  it('does NOT block read-only tools (Read)', async () => {
+    const blocks: any[] = [];
+    const hook = buildDenyEditHook([], blocks);
+    const out = await hook({
+      hook_event_name: 'PreToolUse' as const,
+      tool_name: 'Read',
+      tool_input: { file_path: path.join(PROJECT_ROOT, 'src/agent.ts') },
+      tool_use_id: 'toolu_test',
+      permission_mode: 'default',
+    } as any, undefined, { signal: new AbortController().signal });
+    expect((out as any).continue).toBe(true);
+    expect(blocks.length).toBe(0);
+  });
+
+  it('does NOT block read-only tools (Grep)', async () => {
+    const blocks: any[] = [];
+    const hook = buildDenyEditHook([], blocks);
+    const out = await hook({
+      hook_event_name: 'PreToolUse' as const,
+      tool_name: 'Grep',
+      tool_input: { pattern: 'foo' },
+      tool_use_id: 'toolu_test',
+      permission_mode: 'default',
+    } as any, undefined, { signal: new AbortController().signal });
+    expect((out as any).continue).toBe(true);
+  });
+
+  it('does NOT block read-only tools (Glob)', async () => {
+    const blocks: any[] = [];
+    const hook = buildDenyEditHook([], blocks);
+    const out = await hook({
+      hook_event_name: 'PreToolUse' as const,
+      tool_name: 'Glob',
+      tool_input: { pattern: '**/*.ts' },
+      tool_use_id: 'toolu_test',
+      permission_mode: 'default',
+    } as any, undefined, { signal: new AbortController().signal });
+    expect((out as any).continue).toBe(true);
+  });
+
+  it('does NOT block Task (sub-agent dispatch is the legitimate delegation path)', async () => {
+    const blocks: any[] = [];
+    const hook = buildDenyEditHook([], blocks);
+    const out = await hook({
+      hook_event_name: 'PreToolUse' as const,
+      tool_name: 'Task',
+      tool_input: { description: 'delegate', subagent_type: 'general' },
+      tool_use_id: 'toolu_test',
+      permission_mode: 'default',
+    } as any, undefined, { signal: new AbortController().signal });
+    expect((out as any).continue).toBe(true);
   });
 });

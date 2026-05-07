@@ -210,7 +210,7 @@ function testPreToolUseHookSynthetic(): void {
   // block.
   const v = parseVerdict('VERDICT: REJECTED');
   if (v !== 'REJECTED') fail('parseVerdict broken');
-  ok('hook + verdict parser unit-test green (see src/workflow-runner.test.ts for 11 hook assertions)');
+  ok('hook + verdict parser unit-test green (see src/workflow-runner.test.ts for 14 hook assertions: path-gated Edit/Write/MultiEdit/NotebookEdit + unconditional Bash + read-only tool pass-through)');
 }
 
 async function main(): Promise<void> {

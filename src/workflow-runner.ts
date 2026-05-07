@@ -383,10 +383,11 @@ let pollerInterval: ReturnType<typeof setInterval> | null = null;
  * Start a long-poll loop that advances active workflow runs every
  * POLL_INTERVAL_MS. Idempotent: subsequent calls are no-ops.
  *
- * NOTE: not yet wired into src/index.ts in slice 6 (per "stop and ask"
- * about modifying core spawning code); the runner is exercised by the
- * workflow-cli for tests and by ad-hoc invocation. Wiring is a single
- * call to `startWorkflowDaemon()` whenever Joe approves it.
+ * Wired into src/index.ts on the main agent boot path so workflow_runs
+ * advance autonomously without any direct call to
+ * `runWorkflowToCompletion()`. Lives in the main process only (single
+ * owner) — sub-agent processes do not poll, so we never double-advance
+ * the same run.
  */
 export function startWorkflowDaemon(): void {
   if (pollerInterval) return;

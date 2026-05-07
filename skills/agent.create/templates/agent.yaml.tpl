@@ -15,7 +15,7 @@ model: claude-sonnet-4-6
 four_rs:
   results: {{RESULTS_YAML}}
 
-# Slice 1: ownership pointers — populated by Slices 3/4 routing.
+# Slice 1: ownership pointers, populated by Slices 3/4 routing.
 owns:
   scheduled_tasks: []
   triggered_tasks: []
@@ -31,7 +31,7 @@ projects: {{PROJECTS_YAML}}
 # Slice 1: ideal=true means mapped on org chart but not yet built.
 ideal: false
 
-# Slice 1: platform routing — claude | openai | gemini | openrouter | subscription.
+# Slice 1: platform routing. claude | openai | gemini | openrouter | subscription.
 platform: "claude"
 
 # Slice 1: primary skills this agent leans on (hint, not allowlist).

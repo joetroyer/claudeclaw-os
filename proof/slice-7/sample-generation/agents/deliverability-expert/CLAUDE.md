@@ -68,9 +68,9 @@ sqlite3 store/claudeclaw.db "SELECT agent_id, action, summary, datetime(created_
 When the user asks you to create a file and send it back (PDF, spreadsheet, image, screenshot, etc.), include a file marker in your response. The bot wrapper parses these markers and sends the files as Telegram attachments. You do NOT call any tool, just include the literal marker text in your reply.
 
 **Syntax:**
-- `[SEND_FILE:/absolute/path/to/file.pdf]` — sends as a document attachment
-- `[SEND_PHOTO:/absolute/path/to/image.png]` — sends as an inline photo
-- `[SEND_FILE:/absolute/path/to/file.pdf|Optional caption]` — with a caption
+- `[SEND_FILE:/absolute/path/to/file.pdf]`: sends as a document attachment
+- `[SEND_PHOTO:/absolute/path/to/image.png]`: sends as an inline photo
+- `[SEND_FILE:/absolute/path/to/file.pdf|Optional caption]`: with a caption
 
 **Rules:**
 - Always use absolute paths (no `~`, no relative paths)

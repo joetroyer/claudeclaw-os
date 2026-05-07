@@ -3,6 +3,8 @@ import {
   Brain, Network, Activity, ShieldCheck,
   Swords, Workflow,
   Settings,
+  Webhook,
+  Gauge,
 } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
 
@@ -22,6 +24,7 @@ export interface RouteDef {
 export const ROUTES: RouteDef[] = [
   { path: '/mission',    label: 'Mission Control', section: 'workspace',    icon: LayoutGrid,    shortcut: 'g m' },
   { path: '/scheduled',  label: 'Scheduled',       section: 'workspace',    icon: ListTodo,      shortcut: 'g s' },
+  { path: '/triggered',  label: 'Triggered',       section: 'workspace',    icon: Webhook,       shortcut: 'g t' },
   { path: '/agents',     label: 'Agents',          section: 'workspace',    icon: Users,         shortcut: 'g a' },
   { path: '/org-chart',  label: 'Org Chart',       section: 'workspace',    icon: Workflow,      shortcut: 'g o' },
   { path: '/chat',       label: 'Chat',            section: 'workspace',    icon: MessageSquare, shortcut: 'g c' },
@@ -29,6 +32,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/memories',   label: 'Memories',        section: 'intelligence', icon: Brain,         shortcut: 'g e' },
   { path: '/hive',       label: 'Hive Mind',       section: 'intelligence', icon: Network,       shortcut: 'g h' },
   { path: '/usage',      label: 'Usage',           section: 'intelligence', icon: Activity,      shortcut: 'g u' },
+  { path: '/scorecard',  label: 'Scorecard',       section: 'intelligence', icon: Gauge                        },
   { path: '/audit',      label: 'Audit',           section: 'intelligence', icon: ShieldCheck                   },
 
   { path: '/warroom',    label: 'War Room',        section: 'collaborate',  icon: Swords,        shortcut: 'g w' },

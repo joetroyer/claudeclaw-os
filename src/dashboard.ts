@@ -70,6 +70,7 @@ import { computeNextRun } from './scheduler.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
 import { getSecurityStatus } from './security.js';
 import { AGENT_ID_RE, agentExists, listAgentIds, loadAgentConfig, resolveAgentDir, setAgentModel } from './agent-config.js';
+import { getScorecard, getBudget, type ScorecardWindow } from './scorecard.js';
 import {
   readLobs,
   readHumans,
@@ -1860,6 +1861,28 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     const costTimeline = getDashboardCostTimeline(chatId, 30);
     const recentUsage = getDashboardRecentTokenUsage(chatId, 20);
     return c.json({ stats, costTimeline, recentUsage });
+  });
+
+  // Slice 5 — Performance Scorecard. Per-agent rollup for a window
+  // (default 30d). Cost is recomputed at query time from pricing.yaml
+  // so changing rates doesn't require rewriting historical rows.
+  // Subscription platforms surface cost=0 with subscription_flag=1.
+  app.get('/api/scorecard', (c) => {
+    const w = (c.req.query('window') as ScorecardWindow) || '30d';
+    const allowed: ScorecardWindow[] = ['1d', '7d', '30d', '90d', 'all'];
+    const window = allowed.includes(w) ? w : '30d';
+    return c.json(getScorecard(window));
+  });
+
+  // Slice 5 — Budget rollup. Same window param; groups scorecard rows
+  // by `lob` and by `projects` from agent.yaml. Agents without an
+  // assignment fall under "Unassigned" so empty Slice-1 fields don't
+  // hide spend.
+  app.get('/api/budget', (c) => {
+    const w = (c.req.query('window') as ScorecardWindow) || '30d';
+    const allowed: ScorecardWindow[] = ['1d', '7d', '30d', '90d', 'all'];
+    const window = allowed.includes(w) ? w : '30d';
+    return c.json(getBudget(window));
   });
 
   // Bot info (name, PID, chatId) — reads dynamically from state

@@ -1,0 +1,84 @@
+# Slice 5 — Cost / Token Tracking + Performance Scorecard
+#
+# Per-platform / per-model API pricing in USD per million tokens.
+# Read by src/cost.ts → computeCost(platform, model, input, output).
+#
+# Conventions:
+#   - input  = USD per 1M *input* tokens (prompt, including cache read).
+#   - output = USD per 1M *output* tokens (completion).
+#   - subscription: true → cost is logged as $0 with subscription_flag = 1.
+#                    Tokens are still tallied; dollars are not.
+#   - Unknown (platform, model) pair → best-effort default lookup falls
+#     through to the platform-level "default" entry. If no default
+#     exists, computeCost() returns { cost: 0, source: 'unknown' } so
+#     callers can flag it and a reviewer can spot-fix.
+#
+# Spot-check sources: see proof/slice-5/pricing-source-citations.md.
+# Numbers below are conservative, current as of May 2026, and easy to
+# eyeball against a fresh pricing page. Do NOT remove the citations file
+# without replacing it.
+
+version: 1
+
+platforms:
+  # ── Anthropic Claude (api) ──────────────────────────────────────────
+  claude:
+    default: claude-sonnet-4-6
+    models:
+      claude-opus-4-7:
+        input: 15.0
+        output: 75.0
+      claude-opus-4-6:
+        input: 15.0
+        output: 75.0
+      claude-sonnet-4-6:
+        input: 3.0
+        output: 15.0
+      claude-sonnet-4-5:
+        input: 3.0
+        output: 15.0
+      claude-haiku-4-5:
+        input: 1.0
+        output: 5.0
+
+  # ── OpenAI (api) ────────────────────────────────────────────────────
+  openai:
+    default: gpt-5
+    models:
+      gpt-5:
+        input: 1.25
+        output: 10.0
+      gpt-5-mini:
+        input: 0.25
+        output: 2.0
+
+  # ── Google Gemini (api) ─────────────────────────────────────────────
+  gemini:
+    default: gemini-2.5-pro
+    models:
+      gemini-2.5-pro:
+        input: 1.25
+        output: 10.0
+      gemini-2.5-flash:
+        input: 0.30
+        output: 2.50
+      # Legacy alias kept so older agent.yamls saying "gemini-pro" still
+      # resolve. Maps to the same numbers as 2.5 Pro.
+      gemini-pro:
+        input: 1.25
+        output: 10.0
+
+  # ── OpenRouter (api, pass-through; treat as unknown unless overridden) ─
+  openrouter:
+    # OpenRouter prices vary per upstream model. Without an explicit
+    # match we fall back to claude-sonnet-4-6 rates as a safe upper
+    # bound for the dashboard. If accuracy matters, add the specific
+    # model entry here.
+    default: claude-sonnet-4-6
+    models: {}
+
+  # ── Subscription (Claude Max, ChatGPT Pro, etc.) ────────────────────
+  subscription:
+    subscription: true
+    # Subscription agents: tokens still count, cost = 0, badge shown.
+    models: {}

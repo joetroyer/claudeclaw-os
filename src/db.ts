@@ -2060,6 +2060,73 @@ export function getAgentTokenStats(agentId: string): { todayCost: number; todayT
   return { ...today, allTimeCost: allTime.allTimeCost };
 }
 
+/** Slice 5 — per-agent token rollup over a window (seconds-since-epoch).
+ *  windowStart = 0 means all-time. Returns one row per agent_id present
+ *  in token_usage; agents with zero rows in the window are omitted (the
+ *  scorecard caller layers in the full agent roster from agent.yaml). */
+export interface TokenRollupRow {
+  agent_id: string;
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number;
+}
+
+export function getTokenRollupByAgent(windowStart: number): TokenRollupRow[] {
+  return db
+    .prepare(
+      `SELECT
+         agent_id,
+         COUNT(*)                              as turns,
+         COALESCE(SUM(input_tokens), 0)        as inputTokens,
+         COALESCE(SUM(output_tokens), 0)       as outputTokens,
+         COALESCE(SUM(input_tokens + output_tokens), 0) as totalTokens,
+         COALESCE(SUM(cost_usd), 0)            as costUsd
+       FROM token_usage
+       WHERE created_at >= ?
+       GROUP BY agent_id`,
+    )
+    .all(windowStart) as TokenRollupRow[];
+}
+
+/** Slice 5 — mission_tasks completion rollup per agent. completion_rate
+ *  is computed by the caller as completed / (completed + failed); we
+ *  return raw counts so the caller can decide whether to include
+ *  cancelled in the denominator. */
+export interface MissionRollupRow {
+  agent_id: string;
+  total: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  running: number;
+  queued: number;
+  /** Average wall-clock duration in seconds for tasks that have a
+   *  completed_at + started_at. Null when no tasks completed in window. */
+  avgDurationSec: number | null;
+}
+
+export function getMissionRollupByAgent(windowStart: number): MissionRollupRow[] {
+  return db
+    .prepare(
+      `SELECT
+         COALESCE(assigned_agent, '') as agent_id,
+         COUNT(*) as total,
+         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+         SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END) as failed,
+         SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled,
+         SUM(CASE WHEN status = 'running'   THEN 1 ELSE 0 END) as running,
+         SUM(CASE WHEN status = 'queued'    THEN 1 ELSE 0 END) as queued,
+         AVG(CASE WHEN started_at IS NOT NULL AND completed_at IS NOT NULL
+                  THEN (completed_at - started_at) ELSE NULL END) as avgDurationSec
+       FROM mission_tasks
+       WHERE created_at >= ?
+       GROUP BY assigned_agent`,
+    )
+    .all(windowStart) as MissionRollupRow[];
+}
+
 export function getAgentRecentConversation(agentId: string, chatId: string, limit = 4): ConversationTurn[] {
   return db
     .prepare(

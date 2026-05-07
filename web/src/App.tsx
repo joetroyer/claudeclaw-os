@@ -10,8 +10,10 @@ import { Memories } from '@/pages/Memories';
 import { HiveMind } from '@/pages/HiveMind';
 import { Agents } from '@/pages/Agents';
 import { Scheduled } from '@/pages/Scheduled';
+import { Triggered } from '@/pages/Triggered';
 import { Audit } from '@/pages/Audit';
 import { Usage } from '@/pages/Usage';
+import { Scorecard } from '@/pages/Scorecard';
 import { Settings } from '@/pages/Settings';
 import { Voices } from '@/pages/Voices';
 import { Chat } from '@/pages/Chat';
@@ -48,6 +50,8 @@ export function App() {
         <Switch>
           <Route path="/mission"><MissionControl /></Route>
           <Route path="/scheduled"><Scheduled /></Route>
+          <Route path="/triggered"><Triggered /></Route>
+          <Route path="/triggered/:slug"><Triggered /></Route>
           <Route path="/agents"><Agents /></Route>
           <Route path="/agents/:id/files"><AgentFiles /></Route>
           <Route path="/org-chart"><OrgChart /></Route>
@@ -55,6 +59,8 @@ export function App() {
           <Route path="/memories"><Memories /></Route>
           <Route path="/hive"><HiveMind /></Route>
           <Route path="/usage"><Usage /></Route>
+          <Route path="/scorecard"><Scorecard initialView="scorecard" /></Route>
+          <Route path="/budget"><Scorecard initialView="budget" /></Route>
           <Route path="/audit"><Audit /></Route>
           <Route path="/warroom"><WarRoom /></Route>
           <Route path="/voices"><Voices /></Route>

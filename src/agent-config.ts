@@ -194,6 +194,101 @@ export function getAgentCapabilities(
   }
 }
 
+/** Slice 5 — Slice-1 metadata fields read straight from agent.yaml.
+ *  Kept separate from `AgentConfig` because:
+ *    1. `loadAgentConfig` requires a valid bot token; org-chart and
+ *       scorecard rollups want to render even when the token is missing.
+ *    2. These fields are queryable metadata, not runtime persona — the
+ *       agent harness doesn't need them to boot.
+ *  All fields are optional; missing keys fall back to safe defaults. */
+export interface AgentSliceMetadata {
+  id: string;
+  /** Display name from agent.yaml `name`. Defaults to the id. */
+  name: string;
+  /** `description`. Empty string if unset. */
+  description: string;
+  /** `model` declaration. May be unset. */
+  model?: string;
+  /** `lob` slug (Slice 1). Empty string when unassigned. */
+  lob: string;
+  /** `projects` array (Slice 1). Empty array when unassigned. */
+  projects: string[];
+  /** `platform` (Slice 1). One of claude / openai / gemini / openrouter /
+   *  subscription. Empty string when unset. */
+  platform: string;
+  /** `skills.primary` (Slice 1). Empty array when unset. */
+  primarySkills: string[];
+  /** `ideal: true` means mapped on the org chart but not yet built. */
+  ideal: boolean;
+}
+
+/** Read Slice-1 metadata for one agent. Returns null if the agent.yaml
+ *  is missing or unparseable; never throws. */
+export function readAgentSliceMetadata(agentId: string): AgentSliceMetadata | null {
+  const agentDir = resolveAgentDir(agentId);
+  const configPath = path.join(agentDir, 'agent.yaml');
+  if (!fs.existsSync(configPath)) return null;
+
+  let raw: Record<string, unknown>;
+  try {
+    raw = yaml.load(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (!raw || typeof raw !== 'object') return null;
+
+  const skillsRaw = raw['skills'] as Record<string, unknown> | undefined;
+  const primarySkills = Array.isArray(skillsRaw?.['primary'])
+    ? (skillsRaw!['primary'] as unknown[]).filter((s): s is string => typeof s === 'string')
+    : [];
+
+  const projectsRaw = raw['projects'];
+  const projects = Array.isArray(projectsRaw)
+    ? (projectsRaw as unknown[]).filter((s): s is string => typeof s === 'string')
+    : [];
+
+  return {
+    id: agentId,
+    name: typeof raw['name'] === 'string' && raw['name'] ? (raw['name'] as string) : agentId,
+    description: typeof raw['description'] === 'string' ? (raw['description'] as string) : '',
+    model: typeof raw['model'] === 'string' ? (raw['model'] as string) : undefined,
+    lob: typeof raw['lob'] === 'string' ? (raw['lob'] as string) : '',
+    projects,
+    platform: typeof raw['platform'] === 'string' ? (raw['platform'] as string) : '',
+    primarySkills,
+    ideal: raw['ideal'] === true,
+  };
+}
+
+/** Read Slice-1 metadata for every agent on disk plus a synthesized
+ *  `main` entry. Used by Slice 5 scorecard / budget rollups. */
+export function listAgentSliceMetadata(): AgentSliceMetadata[] {
+  const ids = listAgentIds();
+  const out: AgentSliceMetadata[] = [];
+
+  // Synthesize 'main' — there is no agents/main/agent.yaml on disk.
+  // Defaults to platform='claude' so cost rollups apply Anthropic rates
+  // unless an operator overrides via env later.
+  out.push({
+    id: 'main',
+    name: 'Main',
+    description: 'Primary ClaudeClaw bot',
+    model: undefined,
+    lob: '',
+    projects: [],
+    platform: 'claude',
+    primarySkills: [],
+    ideal: false,
+  });
+
+  for (const id of ids) {
+    if (id === 'main') continue;
+    const meta = readAgentSliceMetadata(id);
+    if (meta) out.push(meta);
+  }
+  return out;
+}
+
 /**
  * List all configured agents with their descriptions.
  * Unlike `listAgentIds()`, this returns richer metadata and silently

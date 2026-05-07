@@ -132,3 +132,17 @@ $ tsx scripts/migrate-agent-schema.ts /tmp/slice1-not-a-dir-test.txt
 [migrate-agent-schema] agents dir: /tmp/slice1-not-a-dir-test.txt
 [migrate-agent-schema] ERROR: Not a directory: /tmp/slice1-not-a-dir-test.txt
 EXIT: 1
+
+=== Real loader exercise (proof/slice-1/verify-loader.ts) ===
+(replaces the prior js-yaml-only smoke; drives the real loadAgentConfig
+ from src/agent-config.ts against every migrated agent.yaml.example.
+ src/agent-config.ts itself is unchanged.)
+
+$ tsx proof/slice-1/verify-loader.ts
+OK: _template
+OK: comms
+OK: content
+OK: ops
+OK: research
+ALL OK (5 agents loaded via src/agent-config.ts)
+EXIT: 0

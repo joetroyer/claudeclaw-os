@@ -17,6 +17,7 @@ import { Voices } from '@/pages/Voices';
 import { Chat } from '@/pages/Chat';
 import { WarRoom } from '@/pages/WarRoom';
 import { AgentFiles } from '@/pages/AgentFiles';
+import { OrgChart } from '@/pages/OrgChart';
 import { DEFAULT_ROUTE } from '@/lib/routes';
 
 export function App() {
@@ -49,6 +50,7 @@ export function App() {
           <Route path="/scheduled"><Scheduled /></Route>
           <Route path="/agents"><Agents /></Route>
           <Route path="/agents/:id/files"><AgentFiles /></Route>
+          <Route path="/org-chart"><OrgChart /></Route>
           <Route path="/chat"><Chat /></Route>
           <Route path="/memories"><Memories /></Route>
           <Route path="/hive"><HiveMind /></Route>

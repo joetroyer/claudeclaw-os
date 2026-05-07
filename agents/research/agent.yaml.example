@@ -4,3 +4,46 @@ description: Deep web research, academic sources, competitive intel, trend analy
 telegram_bot_token_env: RESEARCH_BOT_TOKEN
 
 model: claude-sonnet-4-6
+
+# ────────────────────────────────────────────────────────────────────
+# Slice 1 — Agent Schema Upgrade (added by scripts/migrate-agent-schema.ts).
+# Additive only. Persona prose (role / responsibilities / personality /
+# backstory) lives in CLAUDE.md, not here.
+# ────────────────────────────────────────────────────────────────────
+
+# Slice 1 (vision5-7-2026): measurable outcomes for the Four Rs.
+# role / responsibilities / requirements live in CLAUDE.md as prose.
+four_rs:
+  results: []
+
+# Slice 1: ownership pointers — scheduled tasks, triggered (webhook)
+# tasks, n8n workflows, watchers.yaml entries this agent is responsible
+# for. Used by Slices 3 (org chart) and 4 (n8n auto-tasks).
+owns:
+  scheduled_tasks: []
+  triggered_tasks: []
+  n8n_workflows: []
+  watchers: []
+
+# Slice 1: line of business this agent rolls up to (used by Slice 3
+# org chart). Empty until lobs.yaml is populated in Slice 3.
+lob: ""
+
+# Slice 1: projects this agent is assigned to (used by Slice 3).
+projects: []
+
+# Slice 1: ideal=true means this agent is mapped on the org chart but
+# not yet built (Slice 3 "Ideal vs Active" tab).
+ideal: false
+
+# Slice 1: platform routing — claude | openai | gemini | openrouter | subscription.
+# Used by Slice 5 cost rollups (subscription = $0 with badge).
+platform: ""
+
+# Slice 1: primary skills this agent leans on. All other skills remain
+# implicitly available — this is a hint, not an allowlist.
+skills:
+  primary: []
+
+# Slice 1: avatar path or URL. Populated by Slice 7 persona generator.
+avatar: ""

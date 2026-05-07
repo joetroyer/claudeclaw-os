@@ -1,0 +1,148 @@
+######################################################################
+# Slice 1 — Agent Schema Upgrade · migration output
+# Captured 2026-05-07T22:01:54Z
+######################################################################
+
+=== First run of scripts/migrate-agent-schema.ts (mutates everything) ===
+
+[migrate-agent-schema] start 2026-05-07T22:01:55.191Z
+[migrate-agent-schema] agents dir: /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-aafed50c459c92e8c/agents
+  wrote _template/agent.yaml.example  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote comms/agent.yaml.example  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote content/agent.yaml.example  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote ops/agent.yaml.example  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+  wrote research/agent.yaml.example  (+8 keys: four_rs, owns, lob, projects, ideal, platform, skills, avatar; skipped existing: none)
+
+[migrate-agent-schema] files scanned:  5
+[migrate-agent-schema] files migrated: 5
+[migrate-agent-schema] already up-to-date: 0
+[migrate-agent-schema] done 2026-05-07T22:01:55.195Z
+
+=== Second run (idempotency check — every file already up-to-date) ===
+
+[migrate-agent-schema] start 2026-05-07T22:01:55.549Z
+[migrate-agent-schema] agents dir: /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-aafed50c459c92e8c/agents
+  ok    _template/agent.yaml.example  (all Slice-1 keys already present)
+  ok    comms/agent.yaml.example  (all Slice-1 keys already present)
+  ok    content/agent.yaml.example  (all Slice-1 keys already present)
+  ok    ops/agent.yaml.example  (all Slice-1 keys already present)
+  ok    research/agent.yaml.example  (all Slice-1 keys already present)
+
+[migrate-agent-schema] files scanned:  5
+[migrate-agent-schema] files migrated: 0
+[migrate-agent-schema] already up-to-date: 5
+[migrate-agent-schema] done 2026-05-07T22:01:55.552Z
+
+=== Existing-keys preservation check ===
+(strips Slice-1 keys from worktree YAMLs and compares to unmigrated
+ production YAMLs — must match bit-identical)
+
+ok       _template/agent.yaml.example (existing keys preserved)
+ok       comms/agent.yaml.example (existing keys preserved)
+ok       content/agent.yaml.example (existing keys preserved)
+ok       ops/agent.yaml.example (existing keys preserved)
+ok       research/agent.yaml.example (existing keys preserved)
+
+=== Loader/parser smoke (every migrated YAML round-trips through js-yaml) ===
+
+ok    _template/agent.yaml.example (parses + has all Slice-1 keys)
+ok    comms/agent.yaml.example (parses + has all Slice-1 keys)
+ok    content/agent.yaml.example (parses + has all Slice-1 keys)
+ok    ops/agent.yaml.example (parses + has all Slice-1 keys)
+ok    research/agent.yaml.example (parses + has all Slice-1 keys)
+
+=== Sample post-migration YAML (agents/comms/agent.yaml.example) ===
+
+name: Comms
+description: All human communication -- email, Slack, WhatsApp, YouTube comments, community forums, LinkedIn DMs
+
+telegram_bot_token_env: COMMS_BOT_TOKEN
+
+model: claude-sonnet-4-6
+
+# Optional: auto-inject your Obsidian vault into this agent's context.
+# Uncomment and point `vault:` at your real vault path. If you don't use
+# Obsidian, leave this whole block commented.
+# obsidian:
+#   vault: /path/to/your/obsidian/vault
+#   folders:
+#     - Projects/
+#     - Inbox/
+#   read_only:
+#     - Daily Notes/
+
+# ────────────────────────────────────────────────────────────────────
+# Slice 1 — Agent Schema Upgrade (added by scripts/migrate-agent-schema.ts).
+# Additive only. Persona prose (role / responsibilities / personality /
+# backstory) lives in CLAUDE.md, not here.
+# ────────────────────────────────────────────────────────────────────
+
+# Slice 1 (vision5-7-2026): measurable outcomes for the Four Rs.
+# role / responsibilities / requirements live in CLAUDE.md as prose.
+four_rs:
+  results: []
+
+# Slice 1: ownership pointers — scheduled tasks, triggered (webhook)
+# tasks, n8n workflows, watchers.yaml entries this agent is responsible
+# for. Used by Slices 3 (org chart) and 4 (n8n auto-tasks).
+owns:
+  scheduled_tasks: []
+  triggered_tasks: []
+  n8n_workflows: []
+  watchers: []
+
+# Slice 1: line of business this agent rolls up to (used by Slice 3
+# org chart). Empty until lobs.yaml is populated in Slice 3.
+lob: ""
+
+# Slice 1: projects this agent is assigned to (used by Slice 3).
+projects: []
+
+# Slice 1: ideal=true means this agent is mapped on the org chart but
+# not yet built (Slice 3 "Ideal vs Active" tab).
+ideal: false
+
+# Slice 1: platform routing — claude | openai | gemini | openrouter | subscription.
+# Used by Slice 5 cost rollups (subscription = $0 with badge).
+platform: ""
+
+# Slice 1: primary skills this agent leans on. All other skills remain
+# implicitly available — this is a hint, not an allowlist.
+skills:
+  primary: []
+
+# Slice 1: avatar path or URL. Populated by Slice 7 persona generator.
+avatar: ""
+
+=== Graceful error: nonexistent target directory ===
+(reviewer asked the script not to crash with a stack trace when pointed
+ at a path that doesn't exist; verifies clean stderr message + exit 1)
+
+$ tsx scripts/migrate-agent-schema.ts /tmp/does-not-exist-slice1-test
+[migrate-agent-schema] start 2026-05-07T22:13:29.041Z
+[migrate-agent-schema] agents dir: /tmp/does-not-exist-slice1-test
+[migrate-agent-schema] ERROR: Directory not found: /tmp/does-not-exist-slice1-test
+EXIT: 1
+
+=== Graceful error: target is a file, not a directory ===
+
+$ touch /tmp/slice1-not-a-dir-test.txt
+$ tsx scripts/migrate-agent-schema.ts /tmp/slice1-not-a-dir-test.txt
+[migrate-agent-schema] start 2026-05-07T22:13:29.150Z
+[migrate-agent-schema] agents dir: /tmp/slice1-not-a-dir-test.txt
+[migrate-agent-schema] ERROR: Not a directory: /tmp/slice1-not-a-dir-test.txt
+EXIT: 1
+
+=== Real loader exercise (proof/slice-1/verify-loader.ts) ===
+(replaces the prior js-yaml-only smoke; drives the real loadAgentConfig
+ from src/agent-config.ts against every migrated agent.yaml.example.
+ src/agent-config.ts itself is unchanged.)
+
+$ tsx proof/slice-1/verify-loader.ts
+OK: _template
+OK: comms
+OK: content
+OK: ops
+OK: research
+ALL OK (5 agents loaded via src/agent-config.ts)
+EXIT: 0

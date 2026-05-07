@@ -1,0 +1,37 @@
+=== launchctl agent count ===
+       8
+
+=== launchctl agent state (PID, exit, label) ===
+88766	0	com.claudeclaw.clawds
+88798	0	com.claudeclaw.comms
+88802	0	com.claudeclaw.content
+87666	0	com.claudeclaw.goldbot-labs
+90266	0	com.claudeclaw.main
+88807	0	com.claudeclaw.meta
+88821	0	com.claudeclaw.ops
+88657	0	com.claudeclaw.research
+
+=== mission_tasks count ===
+4
+
+=== token_usage count ===
+47
+
+=== production CLAUDE.md hashes ===
+_template 0116d57cc90ee3ba46d2691612b930ce8018196a1b0d1d93e778e2d92889afaf
+clawds 241b26c70c139bcd0776e1b619b4c096d89fafc5a6484333d5d70742960310cf
+comms 0e6430cb83ae92c43f40df4007e91b2882a2887c86586dc9e2f5546decf86dea
+content 5af8c5d2232b6e7d58f43fcdfc60d41c2e225bee294851e41259fd207612027b
+goldbot-labs 2d462c803eff1ccc83ccbb3c44f981f399afada8bd13ad2bd803dd1b25334a97
+meta b8805d157c891d1f3373c69bef4de4dbcd77c9955d8ec91789095f13c5c5ea7c
+ops 9e1b1fbe201d168143d6ec1f9c15bbff4be5db509fc21645f407f22ebebe9c97
+research 633b7eb02eed61a893adf29c3d8ab554030d9162e58380a4789538d90cb8d0bf
+
+=== production agent.yaml files (post) ===
+clawds       52 lines 8cdaffdc0a51c168319e9a3ca0e80ff7138140f732a975ff801db3280a3e5631
+comms       68 lines 49daf3993fb1a858c4a6cb166961571079fc410dab6ffe1e855c7a8154e419a0
+content       64 lines 3d942aca94d4adfff55d9225f883e8f03322c787da90e801b891b239c654c712
+goldbot-labs       47 lines f874266562668ec927bfbf01bc0553cf1c7a32f0d4d6d903242abde0d109b09b
+meta       52 lines c8bb0cdd7dd58fa1d5b93f1ce88ba05de7e55d41f53aef760bc36d6c9d5a96bb
+ops       63 lines 1b14226dd665caf75ce202b614dd63b089024c8c92181cac7137e584469e132e
+research       52 lines 33e6b4badae312a5924d833f515e8a3d605358dd63c9d6211f49aa942511a519

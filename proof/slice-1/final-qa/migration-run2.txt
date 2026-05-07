@@ -1,0 +1,19 @@
+[migrate-agent-schema] start 2026-05-07T22:22:09.210Z
+[migrate-agent-schema] agents dir: /Volumes/4TB-990/dev/claude-clawos/agents
+  ok    _template/agent.yaml.example  (all Slice-1 keys already present)
+  ok    clawds/agent.yaml  (all Slice-1 keys already present)
+  ok    comms/agent.yaml  (all Slice-1 keys already present)
+  ok    comms/agent.yaml.example  (all Slice-1 keys already present)
+  ok    content/agent.yaml  (all Slice-1 keys already present)
+  ok    content/agent.yaml.example  (all Slice-1 keys already present)
+  ok    goldbot-labs/agent.yaml  (all Slice-1 keys already present)
+  ok    meta/agent.yaml  (all Slice-1 keys already present)
+  ok    ops/agent.yaml  (all Slice-1 keys already present)
+  ok    ops/agent.yaml.example  (all Slice-1 keys already present)
+  ok    research/agent.yaml  (all Slice-1 keys already present)
+  ok    research/agent.yaml.example  (all Slice-1 keys already present)
+
+[migrate-agent-schema] files scanned:  12
+[migrate-agent-schema] files migrated: 0
+[migrate-agent-schema] already up-to-date: 12
+[migrate-agent-schema] done 2026-05-07T22:22:09.214Z

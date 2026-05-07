@@ -1,0 +1,5 @@
+Pre-check: mission_tasks=16 workflow_stages=12
+Inserted 10 solo tasks; none flagged as workflow-owned.
+Post-check: mission_tasks=26 (delta=10) workflow_stages=12 (delta=0)
+
+PASS: solo mission_tasks regression check green.

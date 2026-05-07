@@ -1,0 +1,46 @@
+Slice 6 — daemon autonomy proof
+Strategy: insert queued workflow_run, start the daemon,
+poll DB until state=done. NEVER call runWorkflowToCompletion().
+NEVER call advanceWorkflowOnce(). The daemon's own poll loop
+is the only thing that advances the workflow.
+
+=== SETUP — script does not import runWorkflowToCompletion or advanceWorkflowOnce ===
+  Imported from workflow-runner: startWorkflowDaemon, stopWorkflowDaemon
+  (verified by inspecting the import block at top of this file).
+
+=== STEP 1 — Insert queued workflow_run directly into DB ===
+  inserted run id=61d527716040 slug=dev-fix-qa-verify state=queued stage=0
+  PASS — queued workflow_run row exists, untouched by any runner code yet
+
+=== STEP 2 — Start the workflow daemon (same function index.ts boots) ===
+  calling startWorkflowDaemon() — identical to src/index.ts:188
+  PASS — daemon started; poll loop is now ticking every 5s in the background
+
+=== STEP 3 — Poll DB until terminal state (timeout 60s) ===
+  this loop only READS workflow_runs; advancement is the daemon's job
+[19:48:06.574] [32mINFO[39m (13535): [36mSlice 6 workflow daemon started[39m
+  reached state='done' after 10022ms (21 read polls)
+
+=== STEP 4 — Stop daemon and disable stub mode ===
+  PASS — daemon stopped cleanly
+
+=== STEP 5 — Assertions on terminal state ===
+  final state: done
+  final current_stage: 2
+  workflow_stages rows: 2
+    stage[0 sequential/ops attempt=1] verdict=APPROVED mission=3e69b04f
+    stage[1 sequential/research attempt=1] verdict=APPROVED mission=6767701f
+  PASS — state === done; both stages APPROVED; both stages finished_at set
+
+=== PROOF SUMMARY ===
+  run id: 61d527716040
+  workflow: dev-fix-qa-verify (2 sequential stages)
+  initial state: queued
+  final state:   done
+  advancement mechanism: startWorkflowDaemon() poll loop ONLY
+  this script never called runWorkflowToCompletion()
+  this script never called advanceWorkflowOnce()
+  (grep this file for those names — the only mentions are in this
+   header comment and these log lines.)
+
+Daemon autonomy proof: PASS

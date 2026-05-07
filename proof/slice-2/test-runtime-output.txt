@@ -1,0 +1,44 @@
+=== Runtime evidence — Slice 2 webhook contract tests ===
+Date: Thu May  7 19:38:36 EDT 2026
+Node: v25.9.0
+OS: Darwin 25.3.0 arm64
+better-sqlite3: 11.10.0
+NODE_MODULE_VERSION (current Node): 141
+Worktree: /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/slice-2-review
+Branch: slice-2-triggered-tasks
+Command: npx vitest run src/webhook.contract.test.ts --reporter=verbose
+
+Notes:
+  - Previous review reported tests unverified due to missing
+    node_modules/better-sqlite3 in the worktree (sandbox failure was an
+    environmental ABI mismatch, not a real test regression).
+  - Resolution: ran `npm install --ignore-scripts` then
+    `npm rebuild better-sqlite3` so the native module ABI matches the
+    current Node runtime (NODE_MODULE_VERSION 141).
+  - Suite was 11 tests pre-fix; this run is 13 tests (split the single
+    "preview captures payload" test into "preview rejects unsigned 401"
+    + "preview rejects mis-signed 401" + "preview captures payload when
+    HMAC is valid", to lock in the uniform-HMAC behaviour).
+
+=== Vitest output (verbose) ===
+
+ RUN  v2.1.9 /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/slice-2-review
+
+ ✓ src/webhook.contract.test.ts > Slice 2 webhook ingress (POST /api/watchers/webhook/:slug) > rejects unsigned POST in run mode with 401
+ ✓ src/webhook.contract.test.ts > Slice 2 webhook ingress (POST /api/watchers/webhook/:slug) > rejects mis-signed POST in run mode with 401
+ ✓ src/webhook.contract.test.ts > Slice 2 webhook ingress (POST /api/watchers/webhook/:slug) > accepts valid HMAC and queues actions in run mode
+ ✓ src/webhook.contract.test.ts > Slice 2 webhook ingress (POST /api/watchers/webhook/:slug) > accepts bare-hex signature (no sha256= prefix)
+ ✓ src/webhook.contract.test.ts > Slice 2 webhook ingress (POST /api/watchers/webhook/:slug) > preview mode rejects unsigned requests with 401
+ ✓ src/webhook.contract.test.ts > Slice 2 webhook ingress (POST /api/watchers/webhook/:slug) > preview mode rejects mis-signed requests with 401
+ ✓ src/webhook.contract.test.ts > Slice 2 webhook ingress (POST /api/watchers/webhook/:slug) > preview mode captures payload but does NOT fire actions when HMAC is valid
+ ✓ src/webhook.contract.test.ts > Slice 2 webhook ingress (POST /api/watchers/webhook/:slug) > returns 404 for unknown slug
+ ✓ src/webhook.contract.test.ts > Slice 2 webhook ingress (POST /api/watchers/webhook/:slug) > rejects invalid slug format with 400
+ ✓ src/webhook.contract.test.ts > Slice 2 webhook list + read endpoints (auth-gated) > requires token to list webhooks
+ ✓ src/webhook.contract.test.ts > Slice 2 webhook list + read endpoints (auth-gated) > lists configured webhook watchers with computed URL
+ ✓ src/webhook.contract.test.ts > Slice 2 webhook list + read endpoints (auth-gated) > returns last payloads for a slug
+ ✓ src/webhook.contract.test.ts > Slice 2 webhook list + read endpoints (auth-gated) > fire-test endpoint writes a test payload and runs actions
+
+ Test Files  1 passed (1)
+      Tests  13 passed (13)
+   Start at  19:38:28
+   Duration  725ms (transform 216ms, setup 7ms, collect 454ms, tests 50ms, environment 0ms, prepare 28ms)

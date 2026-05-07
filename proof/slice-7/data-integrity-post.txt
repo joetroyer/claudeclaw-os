@@ -1,0 +1,66 @@
+=== Slice 7 POST-state ===
+Date: 2026-05-07T23:01:50Z
+Worktree: /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a93afcbae3efd81b7
+Branch: worktree-agent-a93afcbae3efd81b7
+
+--- agents/ count (production tree, NOT touched by Slice 7) ---
+      10
+
+--- agents/ list (production tree) ---
+_template
+clawds
+comms
+content
+goldbot-labs
+meta
+ops
+research
+schema.md
+trading-monitor
+
+Note: any new entries vs pre.txt are from concurrent worktrees, NOT Slice 7.
+
+--- launchctl claudeclaw count (must equal pre) ---
+       8
+
+--- launchctl claudeclaw entries ---
+87666	0	com.claudeclaw.goldbot-labs
+90266	0	com.claudeclaw.main
+88766	0	com.claudeclaw.clawds
+88798	0	com.claudeclaw.comms
+88657	0	com.claudeclaw.research
+88807	0	com.claudeclaw.meta
+88821	0	com.claudeclaw.ops
+88802	0	com.claudeclaw.content
+
+--- launchd plists in repo (production tree, NOT touched by Slice 7) ---
+com.claudeclaw.comms.plist
+com.claudeclaw.content.plist
+com.claudeclaw.goldbot-labs.plist
+com.claudeclaw.main.plist
+com.claudeclaw.meta.plist
+com.claudeclaw.ops.plist
+com.claudeclaw.research.plist
+com.claudeclaw.trading-monitor.plist
+
+--- existing CLAUDE.md hashes (production tree, must match pre) ---
+0116d57cc90ee3ba46d2691612b930ce8018196a1b0d1d93e778e2d92889afaf  /Volumes/4TB-990/dev/claude-clawos/agents/_template/CLAUDE.md
+241b26c70c139bcd0776e1b619b4c096d89fafc5a6484333d5d70742960310cf  /Volumes/4TB-990/dev/claude-clawos/agents/clawds/CLAUDE.md
+0e6430cb83ae92c43f40df4007e91b2882a2887c86586dc9e2f5546decf86dea  /Volumes/4TB-990/dev/claude-clawos/agents/comms/CLAUDE.md
+5af8c5d2232b6e7d58f43fcdfc60d41c2e225bee294851e41259fd207612027b  /Volumes/4TB-990/dev/claude-clawos/agents/content/CLAUDE.md
+2d462c803eff1ccc83ccbb3c44f981f399afada8bd13ad2bd803dd1b25334a97  /Volumes/4TB-990/dev/claude-clawos/agents/goldbot-labs/CLAUDE.md
+b8805d157c891d1f3373c69bef4de4dbcd77c9955d8ec91789095f13c5c5ea7c  /Volumes/4TB-990/dev/claude-clawos/agents/meta/CLAUDE.md
+9e1b1fbe201d168143d6ec1f9c15bbff4be5db509fc21645f407f22ebebe9c97  /Volumes/4TB-990/dev/claude-clawos/agents/ops/CLAUDE.md
+633b7eb02eed61a893adf29c3d8ab554030d9162e58380a4789538d90cb8d0bf  /Volumes/4TB-990/dev/claude-clawos/agents/research/CLAUDE.md
+3577c63c5c0988b464e1ac1c82efe50010c82cd3b1ee16066847eae614ecdb84  /Volumes/4TB-990/dev/claude-clawos/agents/trading-monitor/CLAUDE.md
+
+--- src/agent-create.ts hash (worktree branch — must match pre) ---
+12e3f88ef8c0bf5535f02cfa292e2181e27e4c4d2099860ae14a1d8771e4b98b  /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a93afcbae3efd81b7/src/agent-create.ts
+
+--- worktree-side new files (Slice 7 deliverables) ---
+?? proof/
+?? scripts/agent-gen-avatar.ts
+?? scripts/agent-persona-scaffold.ts
+?? skills/agent.create/
+
+--- diff of src/agent-create.ts between main and worktree branch (must be empty) ---

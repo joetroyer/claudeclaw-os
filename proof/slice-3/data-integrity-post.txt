@@ -2,7 +2,6 @@
 Captured: 2026-05-07T23:45:00Z
 
 Worktree:        /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a8df5c79d9d35ae09
-Worktree HEAD:   adc3d72  (chore(slice-3): refresh proof artifacts to current HEAD)
 Worktree branch: worktree-agent-a8df5c79d9d35ae09
 
 # Slice 3 contract: read-only consumer. The implementation adds new

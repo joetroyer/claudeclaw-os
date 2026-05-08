@@ -316,6 +316,9 @@ export function OrgChartV2() {
   // Track whether we've applied default open-state. We open all roots by
   // default if no stored / URL state told us otherwise. This runs once
   // after the initial fetch resolves.
+  // Slice 10 Wave 4 — default depth bumped from 2 → 3. Joe sees most
+  // of the org without clicking; matches Callan's reference where the
+  // first frame already shows the leadership tier expanded.
   const defaultedRef = useRef(false);
   useEffect(() => {
     if (defaultedRef.current) return;
@@ -329,8 +332,17 @@ export function OrgChartV2() {
       defaultedRef.current = true;
       return;
     }
-    // Default expansion: every root open (depth-2 visible).
-    setExpanded(new Set(roots.map((r) => r.id)));
+    // Default expansion: every node up to depth 3 visible. Walks the
+    // tree once and sets all nodes whose own depth is ≤ 2 (since a
+    // node's "open" state means its children are visible — opening
+    // depth-2 nodes makes the depth-3 row of children show up).
+    const next = new Set<string>();
+    function walk(n: TreeNode) {
+      if (n.depth <= 2) next.add(n.id);
+      for (const c of n.children) walk(c);
+    }
+    for (const r of roots) walk(r);
+    setExpanded(next);
     defaultedRef.current = true;
   }, [roots]);
 

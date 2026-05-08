@@ -1,0 +1,114 @@
+=== Slice 6 — Data Integrity POST (final) ===
+Captured: 2026-05-07T19:19:11-04:00
+
+--- mission_tasks schema (UNCHANGED from pre) ---
+CREATE TABLE mission_tasks (
+      id              TEXT PRIMARY KEY,
+      title           TEXT NOT NULL,
+      prompt          TEXT NOT NULL,
+      assigned_agent  TEXT,
+      status          TEXT NOT NULL DEFAULT 'queued',
+      result          TEXT,
+      error           TEXT,
+      created_by      TEXT NOT NULL DEFAULT 'dashboard',
+      priority        INTEGER NOT NULL DEFAULT 0,
+      created_at      INTEGER NOT NULL,
+      started_at      INTEGER,
+      completed_at    INTEGER
+    );
+CREATE INDEX idx_mission_status
+      ON mission_tasks(assigned_agent, status, priority DESC, created_at ASC);
+
+--- workflow_runs schema (NEW, additive) ---
+CREATE TABLE workflow_runs (
+      id              TEXT PRIMARY KEY,
+      workflow_slug   TEXT NOT NULL,
+      current_stage   INTEGER NOT NULL DEFAULT 0,
+      state           TEXT NOT NULL DEFAULT 'queued',
+      started_at      INTEGER NOT NULL,
+      finished_at     INTEGER,
+      payload_json    TEXT NOT NULL DEFAULT '{}',
+      created_by      TEXT NOT NULL DEFAULT 'cli'
+    );
+CREATE INDEX idx_workflow_runs_state
+      ON workflow_runs(state, started_at DESC);
+
+--- workflow_stages schema (NEW, additive) ---
+CREATE TABLE workflow_stages (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id          TEXT NOT NULL,
+      stage_idx       INTEGER NOT NULL,
+      stage_type      TEXT NOT NULL DEFAULT 'sequential',
+      agent_id        TEXT NOT NULL,
+      mission_task_id TEXT,
+      verdict         TEXT,
+      output          TEXT,
+      attempt         INTEGER NOT NULL DEFAULT 1,
+      started_at      INTEGER,
+      finished_at     INTEGER,
+      FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+    );
+CREATE INDEX idx_workflow_stages_run
+      ON workflow_stages(run_id, stage_idx);
+CREATE INDEX idx_workflow_stages_mission
+      ON workflow_stages(mission_task_id);
+
+--- mission_tasks count + grouping ---
+34
+proof|3
+regression|10
+workflow|18
+workflow-escalation|3
+
+--- workflow_runs ---
+id            workflow_slug      current_stage  state    
+------------  -----------------  -------------  ---------
+cabae9cc1b8a  dev-fix-qa-verify  2              done     
+1e964887ce33  bug-hunt-council   1              done     
+6d7f62458090  escalation-test    0              escalated
+77b595ae5346  dev-fix-qa-verify  2              done     
+be7fb24a7c10  bug-hunt-council   1              done     
+14bb52e33c45  escalation-test    0              escalated
+aade2284f5f8  dev-fix-qa-verify  2              done     
+72f0e5112069  bug-hunt-council   1              done     
+cbed529cd51c  escalation-test    0              escalated
+
+--- workflow_stages count ---
+18
+
+--- launchctl claudeclaw count (must be unchanged) ---
+       8
+
+--- all tables ---
+agent_file_history
+agent_suggestions
+audit_log
+compaction_events
+consolidations
+conversation_log
+dashboard_settings
+hive_mind
+inter_agent_tasks
+meet_sessions
+memories
+memories_fts
+memories_fts_config
+memories_fts_data
+memories_fts_docsize
+memories_fts_idx
+mission_tasks
+scheduled_tasks
+session_summaries
+sessions
+skill_health
+skill_usage
+slack_messages
+sqlite_sequence
+token_usage
+wa_message_map
+wa_messages
+wa_outbox
+warroom_meetings
+warroom_transcript
+workflow_runs
+workflow_stages

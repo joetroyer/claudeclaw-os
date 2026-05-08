@@ -18,6 +18,7 @@ import { initOrchestrator } from './orchestrator.js';
 import { initScheduler } from './scheduler.js';
 import { setTelegramConnected, setBotInfo } from './state.js';
 import { getVenvPython, killProcess } from './platform.js';
+import { startWorkflowDaemon } from './workflow-runner.js';
 
 // Parse --agent flag
 const agentFlagIndex = process.argv.indexOf('--agent');
@@ -177,6 +178,15 @@ async function main(): Promise<void> {
     }
   } else {
     logger.info({ agentId: AGENT_ID }, 'Skipping decay/consolidation (main process owns these)');
+  }
+
+  // Slice 6 — workflow daemon. Lives in the main process only (single
+  // owner) so we don't double-advance the same workflow_run from
+  // separate agent processes. Polls workflow_runs every 5s; idempotent
+  // re-entry is guarded by the in-module `runningPoll` latch.
+  if (AGENT_ID === 'main') {
+    startWorkflowDaemon();
+    logger.info('Workflow daemon started, polling every 5s');
   }
 
   cleanupOldUploads();

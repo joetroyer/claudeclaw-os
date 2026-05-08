@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'wouter-preact';
-import { Plus, Wand2, Trash2, X, History, Inbox, GripVertical, Maximize2, Minimize2, LayoutGrid as LayoutIcon, Check } from 'lucide-preact';
+import { Plus, Wand2, Trash2, X, History, Inbox, GripVertical, Maximize2, Minimize2, LayoutGrid as LayoutIcon, Check, Workflow as WorkflowIcon } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { Pill, StatusDot } from '@/components/Pill';
 import { PageState } from '@/components/PageState';
@@ -167,20 +167,23 @@ export function MissionControl() {
       {loading && <PageState loading />}
 
       {!loading && !error && (
-        <div class="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
-          <div class="flex gap-3 p-4 h-full min-w-max">
-            <InboxColumn tasks={inbox} onChange={tasks.refresh} agents={orderedAgents} />
-            {orderedAgents.map((a) => (
-              <AgentColumn
-                key={a.id}
-                agent={a}
-                tasks={byAgent[a.id] ?? []}
-                onChange={tasks.refresh}
-                onColumnDrop={handleColumnDrop}
-              />
-            ))}
+        <>
+          <WorkflowsBanner />
+          <div class="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
+            <div class="flex gap-3 p-4 h-full min-w-max">
+              <InboxColumn tasks={inbox} onChange={tasks.refresh} agents={orderedAgents} />
+              {orderedAgents.map((a) => (
+                <AgentColumn
+                  key={a.id}
+                  agent={a}
+                  tasks={byAgent[a.id] ?? []}
+                  onChange={tasks.refresh}
+                  onColumnDrop={handleColumnDrop}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       <CreateTaskModal
@@ -1079,6 +1082,167 @@ function HistoryList() {
       {items.length === 0 && !loading && !error && (
         <div class="text-center text-[11.5px] text-[var(--color-text-faint)] py-12">No completed tasks yet</div>
       )}
+    </div>
+  );
+}
+
+// ── Slice 6 — Workflows banner ───────────────────────────────────────
+// Compact strip rendered above the kanban that surfaces active /
+// recently-finished workflow runs. Each run row expands into a stage
+// breakdown drawer; council stages render side-by-side per the spec.
+
+interface WorkflowRun {
+  id: string;
+  workflow_slug: string;
+  current_stage: number;
+  state: 'queued' | 'running' | 'approved' | 'escalated' | 'done' | 'failed';
+  started_at: number;
+  finished_at: number | null;
+  payload_json: string;
+  created_by: string;
+}
+
+interface WorkflowStage {
+  id: number;
+  run_id: string;
+  stage_idx: number;
+  stage_type: 'sequential' | 'council';
+  agent_id: string;
+  mission_task_id: string | null;
+  verdict: string | null;
+  output: string | null;
+  attempt: number;
+  started_at: number | null;
+  finished_at: number | null;
+}
+
+const WF_VISIBLE_SECS = 7 * 24 * 60 * 60; // keep finished runs visible for 7 days
+
+function WorkflowsBanner() {
+  const runs = useFetch<{ runs: WorkflowRun[] }>('/api/workflows/runs?limit=20', 15_000);
+  const [openRunId, setOpenRunId] = useState<string | null>(null);
+
+  const visible = useMemo(() => {
+    const all = runs.data?.runs ?? [];
+    const now = Date.now() / 1000;
+    return all.filter((r) => {
+      if (r.state === 'queued' || r.state === 'running') return true;
+      if (!r.finished_at) return true;
+      return now - r.finished_at < WF_VISIBLE_SECS;
+    });
+  }, [runs.data]);
+
+  if (visible.length === 0) return null;
+
+  return (
+    <div class="px-4 pt-3 pb-1">
+      <div class="flex items-center gap-2 mb-2 text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider">
+        <WorkflowIcon size={13} />
+        Workflows
+        <span class="text-[10px] text-[var(--color-text-faint)] tabular-nums">({visible.length})</span>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        {visible.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            onClick={() => setOpenRunId(r.id)}
+            class="text-left px-3 py-2 rounded-md bg-[var(--color-card)] border border-[var(--color-border)] hover:border-[var(--color-accent)] transition-colors min-w-[220px]"
+          >
+            <div class="flex items-center gap-2">
+              <StatusDot tone={mapWfStateToTone(r.state)} />
+              <span class="text-[12px] font-medium text-[var(--color-text)] truncate">{r.workflow_slug}</span>
+              <span class="ml-auto text-[10px] text-[var(--color-text-faint)]">{r.id.slice(0, 6)}</span>
+            </div>
+            <div class="text-[10.5px] text-[var(--color-text-muted)] mt-0.5">
+              stage {r.current_stage} · {r.state}
+            </div>
+          </button>
+        ))}
+      </div>
+      <Drawer open={!!openRunId} onClose={() => setOpenRunId(null)} title={openRunId ? `Workflow ${openRunId.slice(0, 8)}` : 'Workflow'}>
+        {openRunId && <WorkflowDetail runId={openRunId} />}
+      </Drawer>
+    </div>
+  );
+}
+
+function mapWfStateToTone(state: WorkflowRun['state']): 'queued' | 'running' | 'done' | 'failed' | 'cancelled' {
+  switch (state) {
+    case 'queued':
+      return 'queued';
+    case 'running':
+      return 'running';
+    case 'done':
+    case 'approved':
+      return 'done';
+    case 'failed':
+      return 'failed';
+    case 'escalated':
+      return 'cancelled';
+    default:
+      return 'queued';
+  }
+}
+
+function WorkflowDetail({ runId }: { runId: string }) {
+  const detail = useFetch<{ run: WorkflowRun; stages: WorkflowStage[]; payload: { input?: string; outputs?: Record<string, string>; last_error?: string } }>(`/api/workflows/runs/${runId}`, 5_000);
+  if (detail.error) return <div class="p-3 text-[12px] text-[var(--color-status-failed)]">Failed to load: {String(detail.error)}</div>;
+  if (!detail.data) return <div class="p-3 text-[12px] text-[var(--color-text-muted)]">Loading…</div>;
+  const { run, stages, payload } = detail.data;
+  // Group stages by stage_idx — one group per logical stage. Sequential
+  // groups will have 1 entry; council groups will have N entries that
+  // render side-by-side.
+  const byIdx: Record<number, WorkflowStage[]> = {};
+  for (const s of stages) (byIdx[s.stage_idx] ??= []).push(s);
+  const idxs = Object.keys(byIdx).map((k) => Number(k)).sort((a, b) => a - b);
+
+  return (
+    <div class="p-3 space-y-3">
+      <div class="text-[12px] text-[var(--color-text-muted)]">
+        <div><span class="font-mono">{run.id}</span></div>
+        <div>slug: <span class="font-mono">{run.workflow_slug}</span> · state: <span class="font-mono">{run.state}</span></div>
+        <div>created by: {run.created_by}</div>
+      </div>
+      {payload.input && (
+        <div>
+          <div class="text-[10.5px] text-[var(--color-text-faint)] uppercase tracking-wider mb-1">Input</div>
+          <div class="text-[12px] text-[var(--color-text)] whitespace-pre-wrap font-mono bg-[var(--color-elevated)] p-2 rounded">{payload.input}</div>
+        </div>
+      )}
+      {payload.last_error && (
+        <div>
+          <div class="text-[10.5px] text-[var(--color-status-failed)] uppercase tracking-wider mb-1">Last error</div>
+          <div class="text-[12px] text-[var(--color-status-failed)] whitespace-pre-wrap font-mono bg-[var(--color-elevated)] p-2 rounded">{payload.last_error}</div>
+        </div>
+      )}
+      <div class="space-y-3">
+        {idxs.map((idx) => (
+          <div key={idx} class="border border-[var(--color-border)] rounded-md p-2 bg-[var(--color-card)]">
+            <div class="text-[10.5px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1.5">
+              stage {idx} · {byIdx[idx]![0]!.stage_type}
+            </div>
+            <div class={byIdx[idx]!.length > 1 ? 'grid grid-cols-1 md:grid-cols-3 gap-2' : 'space-y-2'}>
+              {byIdx[idx]!.map((s) => (
+                <div key={s.id} class="bg-[var(--color-elevated)] rounded p-2">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[12px] font-medium text-[var(--color-text)]">{s.agent_id}</span>
+                    <span class="text-[10.5px] text-[var(--color-text-muted)] tabular-nums">attempt {s.attempt}</span>
+                    {s.verdict && (
+                      <Pill tone={s.verdict === 'APPROVED' ? 'done' : s.verdict === 'REJECTED' ? 'failed' : 'neutral'}>
+                        {s.verdict}
+                      </Pill>
+                    )}
+                  </div>
+                  {s.output && (
+                    <div class="text-[11.5px] text-[var(--color-text-muted)] whitespace-pre-wrap mt-1 line-clamp-6">{s.output}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

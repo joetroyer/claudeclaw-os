@@ -1,0 +1,73 @@
+=== Slice 6 — Data Integrity PRE ===
+Captured: 2026-05-07T18:55:36-04:00
+
+--- mission_tasks schema ---
+CREATE TABLE mission_tasks (
+      id              TEXT PRIMARY KEY,
+      title           TEXT NOT NULL,
+      prompt          TEXT NOT NULL,
+      assigned_agent  TEXT,
+      status          TEXT NOT NULL DEFAULT 'queued',
+      result          TEXT,
+      error           TEXT,
+      created_by      TEXT NOT NULL DEFAULT 'dashboard',
+      priority        INTEGER NOT NULL DEFAULT 0,
+      created_at      INTEGER NOT NULL,
+      started_at      INTEGER,
+      completed_at    INTEGER
+    );
+CREATE INDEX idx_mission_status
+      ON mission_tasks(assigned_agent, status, priority DESC, created_at ASC);
+
+--- mission_tasks count ---
+4
+
+--- mission_tasks counts by status ---
+completed|4
+
+--- hive_mind row count ---
+4
+
+--- hive_mind columns ---
+0|id|INTEGER|0||1
+1|agent_id|TEXT|1||0
+2|chat_id|TEXT|1||0
+3|action|TEXT|1||0
+4|summary|TEXT|1||0
+5|artifacts|TEXT|0||0
+6|created_at|INTEGER|1||0
+
+--- launchctl claudeclaw count ---
+       8
+
+--- all tables (pre) ---
+agent_file_history
+agent_suggestions
+audit_log
+compaction_events
+consolidations
+conversation_log
+dashboard_settings
+hive_mind
+inter_agent_tasks
+meet_sessions
+memories
+memories_fts
+memories_fts_config
+memories_fts_data
+memories_fts_docsize
+memories_fts_idx
+mission_tasks
+scheduled_tasks
+session_summaries
+sessions
+skill_health
+skill_usage
+slack_messages
+sqlite_sequence
+token_usage
+wa_message_map
+wa_messages
+wa_outbox
+warroom_meetings
+warroom_transcript

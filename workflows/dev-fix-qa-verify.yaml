@@ -1,0 +1,53 @@
+slug: dev-fix-qa-verify
+title: Dev Fix then QA Verify
+description: |
+  Two-stage sequential workflow. Stage 1 (ops) implements the fix from
+  the input prompt. Stage 2 (research) independently verifies the fix
+  worked and reports back. Used as the canonical Slice 6 sequential
+  acceptance test.
+
+default_consensus: majority
+
+allowed_paths:
+  - tasks.md
+  - memory/
+  - plans/
+  - evidence/
+  - docs/
+  - proof/
+
+stages:
+  - name: dev-fix
+    type: sequential
+    agent: ops
+    prompt: |
+      You are acting as the dev agent in a workflow. Implement the fix
+      requested below. You may NOT edit production source files; the
+      workflow runner enforces this via a PreToolUse hook. Stick to
+      writing notes / plans / proof artifacts that summarise what
+      should change.
+
+      Input:
+      {{input}}
+
+      End your response with: VERDICT: APPROVED  (or VERDICT: REJECTED)
+    on_failure:
+      retries: 1
+      escalate_to: meta
+
+  - name: qa-verify
+    type: sequential
+    agent: research
+    prompt: |
+      You are acting as the QA agent in a workflow. The previous stage
+      produced the output below. Independently verify the work was done
+      correctly. Do NOT modify production files; you may write to the
+      allowed_paths only.
+
+      Previous stage output:
+      {{previous_output}}
+
+      End your response with: VERDICT: APPROVED  (or VERDICT: REJECTED)
+    on_failure:
+      retries: 0
+      escalate_to: human

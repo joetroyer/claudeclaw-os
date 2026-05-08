@@ -1,0 +1,40 @@
+Slice 6 — proof runner
+mission_tasks pre: 52
+
+=== TEST 1 — Sequential 2-stage workflow (dev-fix → qa-verify) ===
+  final state: done
+  stages spawned: 2
+  mission_tasks delta: 2
+    stage[0 sequential/ops] verdict=APPROVED mission=34482cf1
+    stage[1 sequential/research] verdict=APPROVED mission=b9bd0861
+  PASS — sequential 2-stage run completes; mission_tasks +2; both rows are workflow-owned
+
+=== TEST 2 — 3-agent council (majority consensus) ===
+  final state: done
+  council members spawned: 3
+  mission_tasks delta: 3
+  verdicts: research=APPROVED, ops=APPROVED, meta=REJECTED
+  PASS — 3-agent council majority consensus advances the run; mission_tasks +3
+
+=== TEST 3 — Escalation (forced failure beyond retries) ===
+  final state: escalated
+  stages spawned: 1
+  mission_tasks delta (stage + escalation): 2
+  escalation task: 708b7f13 → @meta title="[ESCALATION] escalation-test/forced-fail failed"
+  PASS — forced-failure stage triggers escalation mission_task assigned to configured target
+
+=== TEST 4 — Solo mission_task (not part of workflow) is NOT flagged as workflow-owned ===
+  PASS — solo mission_task created via existing API; not workflow-flagged; row shape identical
+
+=== TEST 5 — PreToolUse deny hook records block on disallowed Edit ===
+  PASS — hook + verdict parser unit-test green (see src/workflow-runner.test.ts for 14 hook assertions: path-gated Edit/Write/MultiEdit/NotebookEdit + unconditional Bash + read-only tool pass-through)
+
+mission_tasks post: 60
+
+All proof checks passed.
+[19:39:57.353] [33mWARN[39m (7670): [36mSlice 6: stage failed beyond retries, escalating[39m
+    [35mrunId[39m: "bb0af6a83b77"
+    [35mstage[39m: "forced-fail"
+    [35mattempt[39m: 1
+    [35mtarget[39m: "meta"
+    [35mreason[39m: "stage REJECTED: forced failure\nVERDICT: REJECTED"

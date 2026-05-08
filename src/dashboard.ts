@@ -65,6 +65,11 @@ import {
   dismissAgentSuggestion,
   markAgentSuggestionActed,
   getRecentlySuggestedSplits,
+  // Slice 6 — Workflow runs/stages
+  listWorkflowRuns,
+  getWorkflowRun,
+  getWorkflowStages,
+  createWorkflowRun,
 } from './db.js';
 import { computeNextRun } from './scheduler.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
@@ -1637,6 +1642,43 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     const limit = parseInt(c.req.query('limit') || '30', 10);
     const offset = parseInt(c.req.query('offset') || '0', 10);
     return c.json(getMissionTaskHistory(limit, offset));
+  });
+
+  // ── Slice 6 — Multi-Agent Workflows ──────────────────────────────
+  // Read-only API surface for the dashboard. Dispatching workflows is
+  // done via dist/workflow-cli.js to keep the CLI-first contract from
+  // the orchestrator preference (CLI > MCP).
+
+  app.get('/api/workflows/runs', (c) => {
+    const limit = parseInt(c.req.query('limit') || '50', 10);
+    const runs = listWorkflowRuns(limit);
+    return c.json({ runs });
+  });
+
+  app.get('/api/workflows/runs/:id', (c) => {
+    const id = c.req.param('id');
+    const run = getWorkflowRun(id);
+    if (!run) return c.json({ error: 'not found' }, 404);
+    const stages = getWorkflowStages(id);
+    let payload: unknown = {};
+    try { payload = JSON.parse(run.payload_json || '{}'); } catch { /* ignore */ }
+    return c.json({ run, stages, payload });
+  });
+
+  // Lightweight dispatch endpoint used by tests/automation only — accepts
+  // {slug, input, created_by?}. Returns the new run id. Validation is
+  // minimal because the workflow loader rejects bad slugs at runner time.
+  app.post('/api/workflows/dispatch', async (c) => {
+    let body: { slug?: string; input?: string; created_by?: string } = {};
+    try { body = await c.req.json(); } catch { /* ignore */ }
+    const slug = (body.slug ?? '').trim();
+    if (!slug || !/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+      return c.json({ error: 'invalid slug' }, 400);
+    }
+    const id = crypto.randomBytes(6).toString('hex');
+    const payload = JSON.stringify({ input: body.input ?? '', outputs: {}, attempts: {} });
+    createWorkflowRun(id, slug, payload, body.created_by ?? 'dashboard');
+    return c.json({ id, slug });
   });
 
   // ── Live Meetings (Pika meet-cli wrapper) ──────────────────────────

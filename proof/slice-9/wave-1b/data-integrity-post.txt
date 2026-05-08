@@ -1,0 +1,38 @@
+=== mission_tasks schema (live DB, post-Wave-1B-implementation) ===
+CREATE TABLE mission_tasks (
+      id              TEXT PRIMARY KEY,
+      title           TEXT NOT NULL,
+      prompt          TEXT NOT NULL,
+      assigned_agent  TEXT,
+      status          TEXT NOT NULL DEFAULT 'queued',
+      result          TEXT,
+      error           TEXT,
+      created_by      TEXT NOT NULL DEFAULT 'dashboard',
+      priority        INTEGER NOT NULL DEFAULT 0,
+      created_at      INTEGER NOT NULL,
+      started_at      INTEGER,
+      completed_at    INTEGER
+    , silent_start INTEGER NOT NULL DEFAULT 0, silent_result INTEGER NOT NULL DEFAULT 0, source TEXT, source_id TEXT);
+CREATE INDEX idx_mission_status
+      ON mission_tasks(assigned_agent, status, priority DESC, created_at ASC);
+CREATE INDEX idx_mission_source ON mission_tasks(source, source_id, created_at DESC);
+
+=== mission_tasks row count (live DB) ===
+87
+(grows naturally from production traffic; not affected by this slice — UI-only)
+
+=== Files changed by this slice vs Wave 0 baseline (e38bf63) ===
+ web/src/pages/Triggered.tsx | 282 +++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 278 insertions(+), 4 deletions(-)
+
+=== File-touch confirmation ===
+Server-side files changed: 0
+Web (UI) files changed:    1
+Proof files added:         0
+
+=== Diff for /api/activity endpoint definition (must be empty) ===
+0
+0
+(line-prefix diff count — 0 means the endpoint shape is untouched)
+
+=== captured at 2026-05-08T11:31:57-04:00 ===

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
-import { Webhook, Copy, Check, PlayCircle, ChevronRight, ChevronDown, Plus, Pencil, Trash2 } from 'lucide-preact';
+import { useLocation } from 'wouter-preact';
+import { Webhook, Copy, Check, PlayCircle, ChevronRight, ChevronDown, Plus, Pencil, Trash2, ArrowRight } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { Pill } from '@/components/Pill';
 import { PageState } from '@/components/PageState';
@@ -11,15 +12,34 @@ import { formatRelativeTime } from '@/lib/format';
 import { pushToast } from '@/lib/toasts';
 
 // Slice 2 — Triggered Tasks UI.
+// Slice 9 Wave 1B — added per-watcher health stats + recent fires panel
+// powered by /api/activity?source=webhook&source_id=<slug>.
 //
 // Lists every webhook watcher from /api/watchers/webhook, with per-watcher:
 //   - copyable webhook URL
 //   - mode badge (test | preview | run)
 //   - secret-set indicator
+//   - health stats strip (fires today, success rate, last fire, status dot)
 //   - actions summary
-//   - last-N payloads viewer (for preview mode payload-shape verification)
+//   - recent fires panel (last 50 mission_tasks; mission-level)
+//   - last-N payloads viewer (HTTP-level, for preview-mode payload shape)
 //   - fire-test-payload form (sends user-supplied JSON to the same actions
 //     pipeline that production webhooks hit)
+
+// ── Wave 1B health-stat thresholds (tunable) ────────────────────────────
+// Surfaced as top-level constants so we can adjust without touching
+// rendering logic. Status-dot rules (spec — see statusColor() below):
+//   green   : last fire <1h ago AND success rate ≥80%
+//   yellow  : 1–24h ago OR 60–80% success
+//   red     : >24h ago OR <60% success
+// Red dominates, then yellow, then green.
+const FRESH_WINDOW_SEC = 60 * 60;            // 1h
+const STALE_WINDOW_SEC = 24 * 60 * 60;       // 24h
+const HEALTHY_RATE = 0.8;                    // 80%
+const DEGRADED_RATE = 0.6;                   // 60%
+const STATS_WINDOW_SEC = 24 * 60 * 60;       // "today" = trailing 24h
+const RECENT_FIRES_LIMIT = 50;
+const STATS_POLL_MS = 30_000;
 
 interface WebhookWatcher {
   name: string;
@@ -40,6 +60,83 @@ interface WebhookPayloadRow {
   mode: string;
   received_at: number;
   remote_ip: string;
+}
+
+// Subset of /api/activity row shape we depend on. Keep loose so a
+// future field on the activity contract doesn't crash this page.
+interface ActivityRow {
+  id: string;
+  agent_id: string | null;
+  title: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  source: string | null;
+  source_id: string | null;
+  created_at: number;
+  started_at: number | null;
+  completed_at: number | null;
+  duration_ms: number | null;
+  result_summary: string | null;
+}
+
+interface WatcherHealth {
+  fires: number;
+  done: number;
+  failed: number;
+  successRate: number | null;        // null when no completed/failed rows
+  lastFireAt: number | null;
+  statusTone: 'green' | 'yellow' | 'red' | 'idle';
+  rows: ActivityRow[];
+}
+
+// Pure status-tone resolver — split out so unit tests / boundary checks
+// can hit it directly. Encodes the spec rule precisely:
+//   red    : ageSec > STALE_WINDOW_SEC OR successRate < DEGRADED_RATE
+//   yellow : ageSec > FRESH_WINDOW_SEC OR successRate < HEALTHY_RATE
+//   green  : ageSec ≤ FRESH_WINDOW_SEC AND successRate ≥ HEALTHY_RATE
+// Order matters: red dominates, then yellow, then green. The OR (vs AND)
+// is the load-bearing detail — a recent fire with a 50% success rate must
+// trip yellow, not stay green.
+export function statusColor(ageSec: number, successRate: number): 'green' | 'yellow' | 'red' {
+  if (ageSec > STALE_WINDOW_SEC || successRate < DEGRADED_RATE) return 'red';
+  if (ageSec > FRESH_WINDOW_SEC || successRate < HEALTHY_RATE) return 'yellow';
+  return 'green';
+}
+
+function deriveHealth(rows: ActivityRow[]): WatcherHealth {
+  if (rows.length === 0) {
+    return { fires: 0, done: 0, failed: 0, successRate: null, lastFireAt: null, statusTone: 'idle', rows };
+  }
+  let done = 0;
+  let failed = 0;
+  let lastFireAt = 0;
+  for (const r of rows) {
+    if (r.status === 'completed') done += 1;
+    if (r.status === 'failed') failed += 1;
+    if (r.created_at > lastFireAt) lastFireAt = r.created_at;
+  }
+  const finalised = done + failed;
+  const successRate = finalised > 0 ? done / finalised : null;
+  const ageSec = lastFireAt > 0 ? (Date.now() / 1000) - lastFireAt : Infinity;
+  let tone: WatcherHealth['statusTone'];
+  // If we have no finalised rows yet, freshness alone drives the tone —
+  // there's no success-rate signal to consider, so we treat success as
+  // implicitly healthy and only the age axis matters.
+  if (successRate === null) {
+    tone = ageSec <= FRESH_WINDOW_SEC ? 'green' : ageSec <= STALE_WINDOW_SEC ? 'yellow' : 'red';
+  } else {
+    tone = statusColor(ageSec, successRate);
+  }
+  return { fires: rows.length, done, failed, successRate, lastFireAt: lastFireAt || null, statusTone: tone, rows };
+}
+
+function statusToneStyle(tone: WatcherHealth['statusTone']): string {
+  switch (tone) {
+    case 'green':  return 'var(--color-status-done)';
+    case 'yellow': return 'var(--color-priority-medium)';
+    case 'red':    return 'var(--color-status-failed)';
+    case 'idle':
+    default:       return 'var(--color-text-faint)';
+  }
 }
 
 export function Triggered() {
@@ -153,6 +250,17 @@ function WatcherCard({
   const [firing, setFiring] = useState(false);
   const [lastResult, setLastResult] = useState<string | null>(null);
 
+  // Per-card poll of /api/activity, scoped to this webhook's source_id and
+  // a 24h window. Drives both the header health strip and the expanded
+  // recent-fires panel (single round-trip serves both).
+  const sinceTs = Math.floor(Date.now() / 1000) - STATS_WINDOW_SEC;
+  const activityPath =
+    `/api/activity?source=webhook&source_id=${encodeURIComponent(watcher.slug)}` +
+    `&since=${sinceTs}&limit=${RECENT_FIRES_LIMIT}`;
+  const activity = useFetch<{ activity: ActivityRow[] }>(activityPath, STATS_POLL_MS);
+  const rows = activity.data?.activity ?? [];
+  const health = deriveHealth(rows);
+
   async function copyUrl() {
     try {
       await navigator.clipboard.writeText(watcher.webhook_url);
@@ -220,12 +328,13 @@ function WatcherCard({
     'neutral';
 
   return (
-    <div class="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg overflow-hidden">
+    <div class="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg overflow-hidden" data-testid={`watcher-card-${watcher.slug}`}>
       {/* Header row */}
       <div class="px-4 py-3 flex items-center gap-3">
         <button
           type="button"
           onClick={toggleOpen}
+          data-testid={`toggle-watcher-${watcher.slug}`}
           class="text-[var(--color-text-muted)] hover:text-[var(--color-text)] -ml-1"
           aria-label={open ? 'Collapse' : 'Expand'}
         >
@@ -263,6 +372,14 @@ function WatcherCard({
           </button>
         </div>
       </div>
+
+      {/* Health stats strip — Wave 1B */}
+      <HealthStrip
+        slug={watcher.slug}
+        loading={activity.loading && !activity.data}
+        error={activity.error}
+        health={health}
+      />
 
       {/* URL row (always visible) */}
       <div class="px-4 pb-3 flex items-center gap-2">
@@ -315,7 +432,16 @@ function WatcherCard({
             </div>
           </div>
 
-          {/* Last payloads */}
+          {/* Recent fires (mission-level) — Wave 1B */}
+          <RecentFiresPanel
+            slug={watcher.slug}
+            loading={activity.loading && !activity.data}
+            error={activity.error}
+            rows={rows}
+            onRefresh={activity.refresh}
+          />
+
+          {/* Last payloads (HTTP-level — complementary to Recent fires) */}
           <div>
             <div class="flex items-center justify-between mb-1.5">
               <div class="text-[12px] font-medium text-[var(--color-text)]">Last payloads</div>
@@ -345,6 +471,178 @@ function WatcherCard({
       )}
     </div>
   );
+}
+
+// ── Wave 1B: per-watcher health strip ───────────────────────────────────
+function HealthStrip({
+  slug, loading, error, health,
+}: {
+  slug: string;
+  loading: boolean;
+  error: string | null;
+  health: WatcherHealth;
+}) {
+  // Always render a strip (empty/loading/error/idle states handled inline)
+  // so Playwright + visual smoke have a stable target to assert on.
+  if (loading) {
+    return (
+      <div
+        class="px-4 py-1.5 border-t border-[var(--color-border)] bg-[var(--color-bg)] text-[11px] text-[var(--color-text-faint)]"
+        data-testid={`health-strip-${slug}`}
+      >
+        Loading health…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div
+        class="px-4 py-1.5 border-t border-[var(--color-border)] bg-[var(--color-bg)] text-[11px] text-[var(--color-status-failed)]"
+        data-testid={`health-strip-${slug}`}
+      >
+        Health: {error}
+      </div>
+    );
+  }
+  const { fires, successRate, lastFireAt, statusTone } = health;
+  return (
+    <div
+      class="px-4 py-1.5 border-t border-[var(--color-border)] bg-[var(--color-bg)] flex items-center gap-3 text-[11px] text-[var(--color-text-muted)] tabular-nums"
+      data-testid={`health-strip-${slug}`}
+    >
+      <span data-testid={`health-fires-${slug}`}>
+        <span class="text-[var(--color-text)] font-medium">{fires}</span> fire{fires === 1 ? '' : 's'} today
+      </span>
+      {successRate !== null && (
+        <>
+          <span class="text-[var(--color-text-faint)]">·</span>
+          <span data-testid={`health-success-${slug}`}>
+            <span class="text-[var(--color-text)] font-medium">{Math.round(successRate * 100)}%</span> success
+          </span>
+        </>
+      )}
+      {lastFireAt !== null && (
+        <>
+          <span class="text-[var(--color-text-faint)]">·</span>
+          <span data-testid={`health-last-${slug}`}>last {formatRelativeTime(lastFireAt)}</span>
+        </>
+      )}
+      <span class="ml-auto inline-flex items-center gap-1.5">
+        <span
+          class="inline-block w-2 h-2 rounded-full"
+          style={{ backgroundColor: statusToneStyle(statusTone) }}
+          data-testid={`health-dot-${slug}`}
+          data-tone={statusTone}
+          aria-label={`status ${statusTone}`}
+          title={`status ${statusTone}`}
+        />
+      </span>
+    </div>
+  );
+}
+
+// ── Wave 1B: per-watcher recent fires panel ─────────────────────────────
+function RecentFiresPanel({
+  slug, loading, error, rows, onRefresh,
+}: {
+  slug: string;
+  loading: boolean;
+  error: string | null;
+  rows: ActivityRow[];
+  onRefresh: () => void;
+}) {
+  // Wave 1A is meant to land Mission Control's activity-source/source_id
+  // URL-param filter. Wave 1A may not be merged yet — link still works,
+  // it just falls through to an unfiltered Mission Control view if the
+  // params aren't read yet. Documented in REVIEW.md.
+  const seeAllHref = `/mission?activity_source=webhook&activity_source_id=${encodeURIComponent(slug)}`;
+  const visible = rows.slice(0, RECENT_FIRES_LIMIT);
+  return (
+    <div data-testid={`recent-fires-${slug}`}>
+      <div class="flex items-center justify-between mb-1.5">
+        <div class="text-[12px] font-medium text-[var(--color-text)]">
+          Recent fires <span class="text-[var(--color-text-faint)] font-normal">(last {RECENT_FIRES_LIMIT}, 24h)</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onRefresh}
+            class="text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          >
+            Refresh
+          </button>
+          <a
+            href={seeAllHref}
+            data-testid={`see-all-activity-${slug}`}
+            class="inline-flex items-center gap-0.5 text-[11px] text-[var(--color-accent)] hover:underline"
+          >
+            See all in Activity <ArrowRight size={11} />
+          </a>
+        </div>
+      </div>
+      {loading && <div class="text-[11.5px] text-[var(--color-text-muted)]">Loading…</div>}
+      {error && (
+        <div class="text-[11.5px] text-[var(--color-status-failed)]">Failed to load: {error}</div>
+      )}
+      {!loading && !error && visible.length === 0 && (
+        <div class="text-[11.5px] text-[var(--color-text-faint)] py-3">
+          No fires in the last 24h.
+        </div>
+      )}
+      {!loading && !error && visible.length > 0 && (
+        <div class="space-y-1" data-testid={`recent-fires-list-${slug}`}>
+          {visible.map((r) => <RecentFireRow key={r.id} row={r} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RecentFireRow({ row }: { row: ActivityRow }) {
+  const [, navigate] = useLocation();
+  const tone: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' =
+    row.status === 'completed' ? 'done' :
+    row.status === 'failed' ? 'failed' :
+    row.status === 'cancelled' ? 'cancelled' :
+    row.status === 'running' ? 'running' :
+    'queued';
+  const dur = row.duration_ms !== null && row.duration_ms !== undefined
+    ? formatDurationMs(row.duration_ms)
+    : null;
+  // Tooltip shows title + result so a click-less hover reveals the gist
+  // without requiring a full mission detail page render. Clicking the row
+  // navigates to Mission Control with ?task=<id> so the parent page can
+  // surface the full mission_task detail (Wave 1A consumes this param;
+  // until it lands, the link still resolves to /mission cleanly).
+  const tooltip = [row.title, row.result_summary].filter(Boolean).join('\n\n');
+  const href = `/mission?task=${encodeURIComponent(row.id)}`;
+  // Render as a <button> for keyboard a11y (Tab + Enter both work) and
+  // screen-reader semantics. Visual styling matches the prior <div> so
+  // the panel looks identical — only the role changes.
+  return (
+    <button
+      type="button"
+      onClick={() => navigate(href)}
+      class="w-full flex items-center gap-2 px-2 py-1 rounded border border-[var(--color-border)] bg-[var(--color-elevated)] text-[11px] text-left hover:bg-[var(--color-card)] hover:border-[var(--color-accent)] transition-colors focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+      title={tooltip}
+      aria-label={`View task ${row.id}`}
+      data-testid={`fire-row-${row.id}`}
+    >
+      <span class="text-[var(--color-text-faint)] tabular-nums w-14 shrink-0">
+        {formatRelativeTime(row.created_at)}
+      </span>
+      <span class="flex-1 truncate text-[var(--color-text)]">{row.title}</span>
+      <Pill tone={tone}>{row.status}</Pill>
+      {dur && <span class="text-[var(--color-text-faint)] tabular-nums shrink-0 w-10 text-right">{dur}</span>}
+    </button>
+  );
+}
+
+function formatDurationMs(ms: number): string {
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60_000) return (ms / 1000).toFixed(1) + 's';
+  if (ms < 3_600_000) return Math.round(ms / 60_000) + 'm';
+  return (ms / 3_600_000).toFixed(1) + 'h';
 }
 
 function PayloadRow({ row }: { row: WebhookPayloadRow }) {

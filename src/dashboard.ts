@@ -9,6 +9,7 @@ import { AGENT_ID, ALLOWED_CHAT_ID, DASHBOARD_PORT, DASHBOARD_TOKEN, DASHBOARD_U
 import crypto from 'crypto';
 import {
   getAllScheduledTasks,
+  createScheduledTask,
   deleteScheduledTask,
   pauseScheduledTask,
   resumeScheduledTask,
@@ -1629,6 +1630,67 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
   app.get('/api/tasks', (c) => {
     const tasks = getAllScheduledTasks();
     return c.json({ tasks });
+  });
+
+  // Create a scheduled task. Reuses the same code path as the
+  // schedule-cli (`createScheduledTask` + `computeNextRun`) so behavior is
+  // identical between CLI and dashboard creation. Validates cron syntax
+  // server-side via cron-parser; an invalid cron returns 400 with the
+  // parser's error message so the UI can surface it inline.
+  //
+  //   Body: { agent_id?, prompt, cron, skill?, title? }
+  //
+  // - agent_id defaults to 'main' (matches CLI semantics)
+  // - skill / title are optional metadata fields persisted as part of
+  //   the prompt prefix (the scheduled_tasks table has no skill column;
+  //   we prepend "[skill:foo] " to keep the schema unchanged)
+  // - title is purely UI-side; the CLI doesn't track titles either, so
+  //   we ignore it server-side and let the UI derive a label from the
+  //   prompt prefix when listing.
+  app.post('/api/tasks', async (c) => {
+    type CreateBody = {
+      agent_id?: string;
+      prompt?: string;
+      cron?: string;
+      schedule?: string;
+      skill?: string;
+      title?: string;
+    };
+    const body = await c.req.json<CreateBody>().catch(() => ({} as CreateBody));
+
+    const prompt = (body?.prompt || '').trim();
+    const cron = (body?.cron || body?.schedule || '').trim();
+    const agentId = (body?.agent_id || 'main').trim();
+    const skill = (body?.skill || '').trim();
+
+    if (!prompt) return c.json({ ok: false, error: 'prompt required' }, 400);
+    if (prompt.length > 10000) return c.json({ ok: false, error: 'prompt too long (max 10000 chars)' }, 400);
+    if (!cron) return c.json({ ok: false, error: 'cron required' }, 400);
+
+    const validAgents = ['main', ...listAgentIds()];
+    if (!validAgents.includes(agentId)) {
+      return c.json({ ok: false, error: `Unknown agent: ${agentId}. Valid: ${validAgents.join(', ')}` }, 400);
+    }
+
+    let nextRun: number;
+    try {
+      nextRun = computeNextRun(cron);
+    } catch (err: any) {
+      return c.json({ ok: false, error: 'invalid cron: ' + (err?.message || String(err)) }, 400);
+    }
+
+    // Skill-prefixed prompt: scheduled_tasks has no skill column, so we
+    // encode it inline. Skipped when no skill is provided.
+    const fullPrompt = skill ? `[skill:${skill}] ${prompt}` : prompt;
+
+    const id = crypto.randomBytes(4).toString('hex');
+    createScheduledTask(id, fullPrompt, cron, nextRun, agentId);
+
+    insertAuditLog(agentId, 'dashboard', 'scheduled_task_created',
+      `id=${id} cron="${cron}" agent=${agentId}${skill ? ' skill=' + skill : ''}`, false);
+
+    const created = getAllScheduledTasks().find((t) => t.id === id);
+    return c.json({ ok: true, task: created });
   });
 
   // Delete a scheduled task

@@ -1,0 +1,10 @@
+
+ RUN  v2.1.9 /Volumes/4TB-990/dev/claude-clawos
+
+ ✓ src/n8n-router.contract.test.ts (19 tests) 121ms
+
+ Test Files  1 passed (1)
+      Tests  19 passed (19)
+   Start at  20:36:49
+   Duration  1.03s (transform 244ms, setup 8ms, collect 600ms, tests 121ms, environment 0ms, prepare 39ms)
+

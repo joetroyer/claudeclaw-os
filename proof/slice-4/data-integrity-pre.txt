@@ -1,0 +1,58 @@
+=== launchctl agent count ===
+       8
+=== mission_tasks count (non-test) ===
+4
+=== watchers in watchers.yaml ===
+8
+=== watcher names ===
+wa-daemon-health
+tunnel-health
+bot-fatal
+warroom-voice-health
+stuck-mission-tasks
+meet-session-stale-cleanup
+incoming-whatsapp-vip
+trading-monitor-trigger
+=== watcher types ===
+   4 log-tail
+   3 sqlite-poll
+   1 webhook
+=== git diff against main (size) ===
+       0
+       0
+=== existing tables ===
+agent_file_history
+agent_suggestions
+audit_log
+compaction_events
+consolidations
+conversation_log
+dashboard_settings
+hive_mind
+inter_agent_tasks
+meet_sessions
+memories
+memories_fts
+memories_fts_config
+memories_fts_data
+memories_fts_docsize
+memories_fts_idx
+mission_tasks
+scheduled_tasks
+session_summaries
+sessions
+skill_health
+skill_usage
+slack_messages
+token_usage
+wa_message_map
+wa_messages
+wa_outbox
+warroom_meetings
+warroom_transcript
+webhook_payloads
+workflow_runs
+workflow_stages
+=== relevant tables present? ===
+mission_tasks
+webhook_payloads

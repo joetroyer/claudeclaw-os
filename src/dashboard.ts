@@ -90,6 +90,9 @@ import {
   getWorkflowRun,
   getWorkflowStages,
   createWorkflowRun,
+  // Slice 9 Wave 0 — Activity feed
+  listActivity,
+  getScheduledTask,
 } from './db.js';
 import { computeNextRun } from './scheduler.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
@@ -1849,13 +1852,20 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       remote_ip: 'dashboard',
     });
 
-    const queuedIds = await runWatcherActions(w.actions, {
-      watcher: w.name,
-      slug,
-      mode: 'test',
-      payload: body,
-      payload_raw: rawBody,
-    });
+    const queuedIds = await runWatcherActions(
+      w.actions,
+      {
+        watcher: w.name,
+        slug,
+        mode: 'test',
+        payload: body,
+        payload_raw: rawBody,
+      },
+      // Slice 9 Wave 0: dashboard fire-test simulates a webhook arriving;
+      // tagging the row with source='webhook' keeps the Activity feed
+      // honest about WHICH spec produced the task.
+      { source: 'webhook', source_id: slug },
+    );
 
     return c.json({ ok: true, mode: 'test', payload_id: payloadId, queued_mission_tasks: queuedIds });
   });
@@ -1950,6 +1960,111 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     return c.json({ task });
   });
 
+  // ── Slice 9 Wave 0: Activity feed ────────────────────────────────────
+  //
+  // Combined chronological feed over mission_tasks with the source spec's
+  // human-readable label joined per row. This endpoint sits AFTER the
+  // /api/* token middleware: external callers don't need this surface,
+  // and exposing every queued task publicly would leak prompts.
+  //
+  // Filters all combine with AND. Repeatable params (source=, status=)
+  // OR within their own group: ?source=webhook&source=scheduled returns
+  // rows whose source is webhook OR scheduled.
+  app.get('/api/activity', (c) => {
+    // Hono returns the FIRST value for repeated query params via .query();
+    // for arrays, .queries() returns every value. Keep both code paths
+    // so a single ?source=webhook still works.
+    const sources = c.req.queries('source') ?? [];
+    const statuses = c.req.queries('status') ?? [];
+    const sourceId = c.req.query('source_id') || undefined;
+    const agent = c.req.query('agent') || undefined;
+    const sinceRaw = c.req.query('since');
+    const limitRaw = c.req.query('limit');
+    const cursor = c.req.query('cursor') || undefined;
+
+    const since = sinceRaw ? Number(sinceRaw) : undefined;
+    if (since !== undefined && (!Number.isFinite(since) || since < 0)) {
+      return c.json({ error: 'since must be a positive integer (unix seconds)' }, 400);
+    }
+    const limit = limitRaw ? Number(limitRaw) : 50;
+    if (!Number.isFinite(limit) || limit < 1) {
+      return c.json({ error: 'limit must be a positive integer' }, 400);
+    }
+
+    // Lightweight allow-list on filter values so a typo in the query
+    // string returns 400 instead of "no rows" and confusing the caller.
+    const validSources = new Set(['webhook', 'scheduled', 'workflow', 'manual', 'mission_cli', 'log-tail', 'sqlite-poll']);
+    for (const s of sources) {
+      if (!validSources.has(s)) {
+        return c.json({ error: `invalid source: ${s}. Valid: ${[...validSources].join(', ')}` }, 400);
+      }
+    }
+    const validStatuses = new Set(['queued', 'running', 'completed', 'failed', 'cancelled']);
+    for (const s of statuses) {
+      if (!validStatuses.has(s)) {
+        return c.json({ error: `invalid status: ${s}. Valid: ${[...validStatuses].join(', ')}` }, 400);
+      }
+    }
+
+    const { rows, next_cursor } = listActivity({
+      sources: sources.length > 0 ? sources : undefined,
+      source_id: sourceId,
+      agent,
+      statuses: statuses.length > 0 ? statuses : undefined,
+      since,
+      limit,
+      cursor,
+    });
+
+    // Source-label join. Cache per-request so a page of 50 rows from the
+    // same workflow run only hits getWorkflowRun() once.
+    const labelCache = new Map<string, string>();
+    const labelFor = (source: string | null, source_id: string | null): string => {
+      if (!source) return 'manual / unknown';
+      const key = `${source}:${source_id ?? ''}`;
+      if (labelCache.has(key)) return labelCache.get(key)!;
+      let label: string;
+      if (source === 'webhook' && source_id) {
+        const w = loadWebhookWatcher(source_id);
+        label = w ? `${source_id} (${w.name})` : source_id;
+      } else if (source === 'scheduled' && source_id) {
+        const t = getScheduledTask(source_id);
+        label = t ? `${source_id} (${t.prompt.slice(0, 60)})` : source_id;
+      } else if (source === 'workflow' && source_id) {
+        const r = getWorkflowRun(source_id);
+        label = r ? `${source_id} (${r.workflow_slug})` : source_id;
+      } else if (source === 'log-tail' || source === 'sqlite-poll') {
+        // source_id is the watcher.name verbatim — no extra spec to join.
+        label = source_id ? `${source_id} (${source})` : source;
+      } else if (source === 'manual') {
+        label = 'manual (dashboard)';
+      } else if (source === 'mission_cli') {
+        label = 'mission-cli';
+      } else {
+        label = source_id || source;
+      }
+      labelCache.set(key, label);
+      return label;
+    };
+
+    const activity = rows.map((r) => ({
+      id: r.id,
+      agent_id: r.assigned_agent,
+      title: r.title,
+      status: r.status,
+      source: r.source,
+      source_id: r.source_id,
+      source_label: labelFor(r.source, r.source_id),
+      created_at: r.created_at,
+      started_at: r.started_at,
+      completed_at: r.completed_at,
+      duration_ms: r.duration_ms,
+      result_summary: r.result_summary,
+    }));
+
+    return c.json({ activity, next_cursor });
+  });
+
   app.post('/api/mission/tasks', async (c) => {
     const body = await c.req.json<{
       title?: string;
@@ -1975,7 +2090,9 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     }
 
     const id = crypto.randomBytes(4).toString('hex');
-    createMissionTask(id, title, prompt, assignedAgent, 'dashboard', priority);
+    // Slice 9 Wave 0: dashboard "New Task" form is a manual create. No
+    // source_id since there's no upstream spec — the human IS the source.
+    createMissionTask(id, title, prompt, assignedAgent, 'dashboard', priority, 'manual', null);
 
     const task = getMissionTask(id);
     return c.json({ task }, 201);

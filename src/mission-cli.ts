@@ -76,7 +76,10 @@ switch (command) {
     }
     const title = titleArg || prompt.slice(0, 60);
     const id = randomBytes(4).toString('hex');
-    createMissionTask(id, title, prompt, targetAgent ?? null, createdBy, priorityArg);
+    // Slice 9 Wave 0: tag every CLI-created task with source='mission_cli'
+    // so the Activity feed can split human-typed CLI invocations from
+    // dashboard form clicks. No source_id since the CLI is the source.
+    createMissionTask(id, title, prompt, targetAgent ?? null, createdBy, priorityArg, 'mission_cli', null);
 
     console.log(`Mission task created: ${id}`);
     console.log(`  Title:    ${title}`);

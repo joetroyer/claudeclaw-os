@@ -391,9 +391,9 @@ export function OrgChartV2() {
         inner.dataset.autoScale = '1';
         return;
       }
-      // Don't shrink below 0.42 so cards stay legible. Below that we
+      // Don't shrink below 0.75 so cards stay legible. Below that we
       // allow horizontal scroll on the canvas for the remainder.
-      const ratio = Math.max(0.42, visible / naturalWidth);
+      const ratio = Math.max(0.75, visible / naturalWidth);
       inner.style.transform = `scale(${ratio.toFixed(3)})`;
       inner.dataset.autoScale = ratio.toFixed(3);
       // Compensate for the layout box not shrinking with transform.
@@ -1085,7 +1085,7 @@ function NodeCard(p: CardProps) {
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); p.onTitle(); }}
-              class="flex-1 min-w-0 min-h-[28px] inline-flex items-center text-[13px] font-semibold leading-tight text-[var(--color-text)] hover:text-[var(--color-accent)] transition-colors text-left truncate"
+              class="flex-1 min-w-0 min-h-[44px] inline-flex items-center text-[13px] font-semibold leading-tight text-[var(--color-text)] hover:text-[var(--color-accent)] transition-colors text-left truncate"
               data-testid={`org-chart-v2-title-${p.node.id}`}
               title={p.node.name}
             >
@@ -1097,7 +1097,7 @@ function NodeCard(p: CardProps) {
               data-testid={`org-chart-v2-badge-${p.node.id}`}
               aria-label={`Filter to ${p.node.type}`}
               title={`Filter to ${isHuman ? 'humans' : 'AI'}`}
-              class="shrink-0 min-h-[28px] min-w-[28px] inline-flex items-center justify-center rounded hover:bg-[var(--color-elevated)] transition-colors"
+              class="shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded hover:bg-[var(--color-elevated)] transition-colors"
             >
               {isHuman
                 ? <User size={11} class="text-[var(--color-text-faint)]" />
@@ -1119,7 +1119,7 @@ function NodeCard(p: CardProps) {
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}
-            class="min-h-[28px] min-w-[28px] inline-flex items-center justify-center rounded-full text-[var(--color-text-faint)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
+            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-full text-[var(--color-text-faint)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
             aria-label="Card actions"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
@@ -1229,7 +1229,7 @@ function NodeCard(p: CardProps) {
           )}
           {humanReportCount > 0 && (
             <span
-              class="inline-flex items-center justify-center gap-0.5 min-h-[44px] min-w-[28px] px-1"
+              class="inline-flex items-center justify-center gap-0.5 min-h-[44px] min-w-[44px] px-2"
               data-testid={`org-chart-v2-reports-${p.node.id}`}
               aria-label={`${humanReportCount} human report${humanReportCount === 1 ? '' : 's'}`}
               title={`${humanReportCount} human report${humanReportCount === 1 ? '' : 's'}`}
@@ -1240,7 +1240,7 @@ function NodeCard(p: CardProps) {
           )}
           {aiReportCount > 0 && (
             <span
-              class="inline-flex items-center justify-center gap-0.5 min-h-[44px] min-w-[28px] px-1"
+              class="inline-flex items-center justify-center gap-0.5 min-h-[44px] min-w-[44px] px-2"
               data-testid={`org-chart-v2-ai-reports-${p.node.id}`}
               aria-label={`${aiReportCount} AI employee${aiReportCount === 1 ? '' : 's'}`}
               title={`${aiReportCount} AI employee${aiReportCount === 1 ? '' : 's'}`}

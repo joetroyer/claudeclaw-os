@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
+import { useLocation } from 'wouter-preact';
 import { Webhook, Copy, Check, PlayCircle, ChevronRight, ChevronDown, Plus, Pencil, Trash2, ArrowRight } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { Pill } from '@/components/Pill';
@@ -27,10 +28,11 @@ import { pushToast } from '@/lib/toasts';
 
 // ── Wave 1B health-stat thresholds (tunable) ────────────────────────────
 // Surfaced as top-level constants so we can adjust without touching
-// rendering logic. Status-dot rules:
-//   green   : last fire ≤ FRESH_WINDOW_SEC AND success rate ≥ HEALTHY_RATE
-//   yellow  : last fire ≤ STALE_WINDOW_SEC OR success rate ≥ DEGRADED_RATE
-//   red     : last fire > STALE_WINDOW_SEC OR success rate < DEGRADED_RATE
+// rendering logic. Status-dot rules (spec — see statusColor() below):
+//   green   : last fire <1h ago AND success rate ≥80%
+//   yellow  : 1–24h ago OR 60–80% success
+//   red     : >24h ago OR <60% success
+// Red dominates, then yellow, then green.
 const FRESH_WINDOW_SEC = 60 * 60;            // 1h
 const STALE_WINDOW_SEC = 24 * 60 * 60;       // 24h
 const HEALTHY_RATE = 0.8;                    // 80%
@@ -86,6 +88,20 @@ interface WatcherHealth {
   rows: ActivityRow[];
 }
 
+// Pure status-tone resolver — split out so unit tests / boundary checks
+// can hit it directly. Encodes the spec rule precisely:
+//   red    : ageSec > STALE_WINDOW_SEC OR successRate < DEGRADED_RATE
+//   yellow : ageSec > FRESH_WINDOW_SEC OR successRate < HEALTHY_RATE
+//   green  : ageSec ≤ FRESH_WINDOW_SEC AND successRate ≥ HEALTHY_RATE
+// Order matters: red dominates, then yellow, then green. The OR (vs AND)
+// is the load-bearing detail — a recent fire with a 50% success rate must
+// trip yellow, not stay green.
+export function statusColor(ageSec: number, successRate: number): 'green' | 'yellow' | 'red' {
+  if (ageSec > STALE_WINDOW_SEC || successRate < DEGRADED_RATE) return 'red';
+  if (ageSec > FRESH_WINDOW_SEC || successRate < HEALTHY_RATE) return 'yellow';
+  return 'green';
+}
+
 function deriveHealth(rows: ActivityRow[]): WatcherHealth {
   if (rows.length === 0) {
     return { fires: 0, done: 0, failed: 0, successRate: null, lastFireAt: null, statusTone: 'idle', rows };
@@ -102,15 +118,13 @@ function deriveHealth(rows: ActivityRow[]): WatcherHealth {
   const successRate = finalised > 0 ? done / finalised : null;
   const ageSec = lastFireAt > 0 ? (Date.now() / 1000) - lastFireAt : Infinity;
   let tone: WatcherHealth['statusTone'];
-  // If we have no finalised rows yet, treat freshness alone as green/yellow/red.
+  // If we have no finalised rows yet, freshness alone drives the tone —
+  // there's no success-rate signal to consider, so we treat success as
+  // implicitly healthy and only the age axis matters.
   if (successRate === null) {
     tone = ageSec <= FRESH_WINDOW_SEC ? 'green' : ageSec <= STALE_WINDOW_SEC ? 'yellow' : 'red';
-  } else if (ageSec <= FRESH_WINDOW_SEC && successRate >= HEALTHY_RATE) {
-    tone = 'green';
-  } else if (ageSec <= STALE_WINDOW_SEC && successRate >= DEGRADED_RATE) {
-    tone = 'yellow';
   } else {
-    tone = 'red';
+    tone = statusColor(ageSec, successRate);
   }
   return { fires: rows.length, done, failed, successRate, lastFireAt: lastFireAt || null, statusTone: tone, rows };
 }
@@ -585,6 +599,7 @@ function RecentFiresPanel({
 }
 
 function RecentFireRow({ row }: { row: ActivityRow }) {
+  const [, navigate] = useLocation();
   const tone: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' =
     row.status === 'completed' ? 'done' :
     row.status === 'failed' ? 'failed' :
@@ -595,13 +610,22 @@ function RecentFireRow({ row }: { row: ActivityRow }) {
     ? formatDurationMs(row.duration_ms)
     : null;
   // Tooltip shows title + result so a click-less hover reveals the gist
-  // without requiring a full mission detail page (Wave 1B keeps scope
-  // tight — full detail navigation is a follow-up).
+  // without requiring a full mission detail page render. Clicking the row
+  // navigates to Mission Control with ?task=<id> so the parent page can
+  // surface the full mission_task detail (Wave 1A consumes this param;
+  // until it lands, the link still resolves to /mission cleanly).
   const tooltip = [row.title, row.result_summary].filter(Boolean).join('\n\n');
+  const href = `/mission?task=${encodeURIComponent(row.id)}`;
+  // Render as a <button> for keyboard a11y (Tab + Enter both work) and
+  // screen-reader semantics. Visual styling matches the prior <div> so
+  // the panel looks identical — only the role changes.
   return (
-    <div
-      class="flex items-center gap-2 px-2 py-1 rounded border border-[var(--color-border)] bg-[var(--color-elevated)] text-[11px]"
+    <button
+      type="button"
+      onClick={() => navigate(href)}
+      class="w-full flex items-center gap-2 px-2 py-1 rounded border border-[var(--color-border)] bg-[var(--color-elevated)] text-[11px] text-left hover:bg-[var(--color-card)] hover:border-[var(--color-accent)] transition-colors focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
       title={tooltip}
+      aria-label={`View task ${row.id}`}
       data-testid={`fire-row-${row.id}`}
     >
       <span class="text-[var(--color-text-faint)] tabular-nums w-14 shrink-0">
@@ -610,7 +634,7 @@ function RecentFireRow({ row }: { row: ActivityRow }) {
       <span class="flex-1 truncate text-[var(--color-text)]">{row.title}</span>
       <Pill tone={tone}>{row.status}</Pill>
       {dur && <span class="text-[var(--color-text-faint)] tabular-nums shrink-0 w-10 text-right">{dur}</span>}
-    </div>
+    </button>
   );
 }
 

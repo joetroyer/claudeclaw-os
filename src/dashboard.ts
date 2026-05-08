@@ -444,7 +444,13 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       return;
     }
     const token = c.req.query('token');
-    if (!DASHBOARD_TOKEN || !token || token !== DASHBOARD_TOKEN) {
+    const tokenOk = !!DASHBOARD_TOKEN && !!token && token === DASHBOARD_TOKEN;
+    // Bypass when request came through Cloudflare Access. The bot binds to
+    // 127.0.0.1, so the only way to receive a Cf-Access-Jwt-Assertion is via
+    // the cloudflared tunnel — which proves the request was authenticated
+    // at the edge. This lets the SPA work without query-string token plumbing.
+    const cfAccessOk = !!c.req.header('cf-access-jwt-assertion');
+    if (!tokenOk && !cfAccessOk) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
     await next();
@@ -455,7 +461,9 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
   // by legacy fallbacks that DO embed the token in the page source.
   function requireToken(c: any): Response | null {
     const token = c.req.query('token');
-    if (!DASHBOARD_TOKEN || !token || token !== DASHBOARD_TOKEN) {
+    const tokenOk = !!DASHBOARD_TOKEN && !!token && token === DASHBOARD_TOKEN;
+    const cfAccessOk = !!c.req.header('cf-access-jwt-assertion');
+    if (!tokenOk && !cfAccessOk) {
       return c.json({ error: 'Unauthorized' }, 401) as Response;
     }
     return null;

@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'wouter-preact';
-import { Plus, Wand2, Trash2, X, History, Inbox, GripVertical, Maximize2, Minimize2, LayoutGrid as LayoutIcon, Check, Workflow as WorkflowIcon } from 'lucide-preact';
+import { Plus, Wand2, Trash2, X, Inbox, GripVertical, Maximize2, Minimize2, LayoutGrid as LayoutIcon, Check, ChevronDown, ChevronRight, Search, Zap, Calendar, GitBranch, User, Radio, HelpCircle } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { Pill, StatusDot } from '@/components/Pill';
 import { PageState } from '@/components/PageState';
-import { Modal, Drawer } from '@/components/Modal';
+import { Modal } from '@/components/Modal';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { useFetch } from '@/lib/useFetch';
 import { apiPost, apiPatch, apiDelete, apiGet } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
+import { useDebouncedValue } from '@/lib/useDebounce';
 import { pushToast } from '@/lib/toasts';
 import {
   workspaceName,
@@ -45,7 +46,6 @@ export function MissionControl() {
   const agents = useFetch<{ agents: Agent[] }>('/api/agents', 60_000);
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [bulkAssigning, setBulkAssigning] = useState(false);
 
   // ?new=1 from the command palette opens the create modal.
@@ -135,13 +135,6 @@ export function MissionControl() {
               {totalActive} active · {inbox.length} unassigned · {tasks.data?.tasks?.length ?? 0} total
             </span>
             <LayoutMenu agents={orderedAgents} />
-            <button
-              type="button"
-              onClick={() => setHistoryOpen(true)}
-              class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
-            >
-              <History size={13} /> History
-            </button>
             {inbox.length > 0 && (
               <button
                 type="button"
@@ -167,10 +160,12 @@ export function MissionControl() {
       {loading && <PageState loading />}
 
       {!loading && !error && (
-        <>
-          <WorkflowsBanner />
-          <div class="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
-            <div class="flex gap-3 p-4 h-full min-w-max">
+        <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+          {/* Kanban: capped at ~55vh so the Activity feed below is always
+              visible without scrolling the page. shrink-0 + max-h keeps it
+              from squeezing the activity panel when many tasks are queued. */}
+          <div class="shrink-0 overflow-x-auto overflow-y-hidden" style={{ maxHeight: '55vh' }}>
+            <div class="flex gap-3 p-4 min-w-max" style={{ height: '52vh' }}>
               <InboxColumn tasks={inbox} onChange={tasks.refresh} agents={orderedAgents} />
               {orderedAgents.map((a) => (
                 <AgentColumn
@@ -183,7 +178,11 @@ export function MissionControl() {
               ))}
             </div>
           </div>
-        </>
+          {/* Activity feed: replaces the old "Task history" drawer. Lives
+              inline below the kanban with its own internal scroll so the
+              page chrome stays put. Slice 9 Wave 1A. */}
+          <ActivityFeed agents={agents.data?.agents ?? []} />
+        </div>
       )}
 
       <CreateTaskModal
@@ -192,12 +191,6 @@ export function MissionControl() {
         agents={agents.data?.agents ?? []}
         onCreated={tasks.refresh}
       />
-
-      <Drawer open={historyOpen} onClose={() => setHistoryOpen(false)} title="Task history">
-        {/* Remount on each open so the fetch fires fresh and a previous
-            error doesn't leave the drawer stuck on an empty state. */}
-        {historyOpen && <HistoryList />}
-      </Drawer>
     </div>
   );
 }
@@ -809,6 +802,7 @@ function TaskCard({ task, onChange }: { task: MissionTask; onChange: () => void 
 
   return (
     <div
+      data-task-id={task.id}
       draggable={draggable}
       onDragStart={(e) => { if (draggable) e.dataTransfer?.setData('text/plain', task.id); }}
       onClick={() => setExpanded((v) => !v)}
@@ -993,256 +987,650 @@ function CreateTaskModal({
   );
 }
 
-// ── History drawer ─────────────────────────────────────────────────
+// ── Slice 9 Wave 1A — Activity feed ────────────────────────────────
+//
+// Replaces the legacy "Task history" drawer. Unified chronological feed
+// over mission_tasks driven by GET /api/activity (Wave 0). Renders inline
+// below the kanban so the pertinent context (active tasks vs recent
+// activity) is visible at a glance without a click-to-open drawer.
+//
+// Filters compose with AND across groups, OR within a group:
+//   sources=[] OR sources matched   AND   agent matches OR none set
+//   AND statuses=[] OR statuses matched   AND   created_at >= since
+//   AND title/result_summary contains query (client-side; the API does
+//   not text-search yet).
+//
+// Aggregation collapse: when ≥10 rows in the visible window share the
+// same source_id, they are folded into a single roll-up row that
+// expands on click. Heuristic for "unique payloads" = count of distinct
+// titles within the group (cheap, doesn't require a second API call).
 
-// Mounted fresh on every drawer open via the `historyOpen` guard in
-// MissionControl. That means the fetch always retries on open — fixes
-// the "drawer empty forever" symptom where a transient backend hiccup
-// at first paint left the list permanently blank with no error visible.
-function HistoryList() {
-  const [items, setItems] = useState<MissionTask[]>([]);
-  const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
+interface ActivityRow {
+  id: string;
+  agent_id: string | null;
+  title: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  source: string | null;
+  source_id: string | null;
+  source_label: string;
+  created_at: number;
+  started_at: number | null;
+  completed_at: number | null;
+  duration_ms: number | null;
+  result_summary: string | null;
+}
+
+type SourceKey =
+  | 'webhook'
+  | 'scheduled'
+  | 'workflow'
+  | 'manual'
+  | 'mission_cli'
+  | 'log-tail'
+  | 'sqlite-poll'
+  | '__legacy'; // legacy = source IS NULL
+
+const SOURCE_OPTIONS: { key: SourceKey; label: string }[] = [
+  { key: 'webhook', label: 'webhook' },
+  { key: 'scheduled', label: 'scheduled' },
+  { key: 'workflow', label: 'workflow' },
+  { key: 'manual', label: 'manual' },
+  { key: 'mission_cli', label: 'mission-cli' },
+  { key: 'log-tail', label: 'log-tail' },
+  { key: 'sqlite-poll', label: 'sqlite-poll' },
+  { key: '__legacy', label: 'legacy / NULL' },
+];
+
+const STATUS_OPTIONS: ActivityRow['status'][] = ['queued', 'running', 'completed', 'failed', 'cancelled'];
+
+const TIME_PRESETS: { key: string; label: string; secs: number | null }[] = [
+  { key: '1h', label: '1h', secs: 3600 },
+  { key: '6h', label: '6h', secs: 6 * 3600 },
+  { key: '24h', label: '24h', secs: 24 * 3600 },
+  { key: '7d', label: '7d', secs: 7 * 86400 },
+  { key: '30d', label: '30d', secs: 30 * 86400 },
+  { key: 'all', label: 'all', secs: null },
+];
+
+const PAGE_SIZE = 50;
+const AGG_THRESHOLD = 10;
+
+// Source badge: emoji + tint. Falls back to ❓ for null/unknown.
+function sourceBadge(source: string | null): { emoji: string; tone: string } {
+  switch (source) {
+    case 'webhook': return { emoji: '⚡', tone: 'var(--color-priority-high)' };
+    case 'scheduled': return { emoji: '📅', tone: 'var(--color-status-running)' };
+    case 'workflow': return { emoji: '🔄', tone: 'var(--color-accent)' };
+    case 'manual': return { emoji: '👤', tone: 'var(--color-text-muted)' };
+    case 'mission_cli': return { emoji: '👤', tone: 'var(--color-text-muted)' };
+    case 'log-tail': return { emoji: '📡', tone: 'var(--color-priority-medium)' };
+    case 'sqlite-poll': return { emoji: '📡', tone: 'var(--color-priority-medium)' };
+    default: return { emoji: '❓', tone: 'var(--color-text-faint)' };
+  }
+}
+
+// Map status → Pill tone. Server status is the mission_task lifecycle:
+// queued | running | completed | failed | cancelled.
+function statusTone(s: ActivityRow['status']): 'queued' | 'running' | 'done' | 'failed' | 'cancelled' {
+  return s === 'completed' ? 'done' : s;
+}
+
+function formatDuration(ms: number | null): string {
+  if (ms == null) return '—';
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60_000) return (ms / 1000).toFixed(1) + 's';
+  if (ms < 3_600_000) return Math.floor(ms / 60_000) + 'm';
+  return (ms / 3_600_000).toFixed(1) + 'h';
+}
+
+// Source label is "slug (description)" from the API. The badge area
+// already shows the source class, so the row link should show just the
+// slug for clickability — strip the "(description)" suffix when present.
+function sourceSlug(label: string): string {
+  const m = label.match(/^([^(]+?)\s*\(/);
+  return (m ? m[1]! : label).trim();
+}
+
+function ActivityFeed({ agents }: { agents: Agent[] }) {
+  const [, navigate] = useLocation();
+  const [selectedSources, setSelectedSources] = useState<Set<SourceKey>>(new Set());
+  const [selectedStatuses, setSelectedStatuses] = useState<Set<ActivityRow['status']>>(new Set());
+  const [selectedAgent, setSelectedAgent] = useState<string>('');
+  const [timeKey, setTimeKey] = useState<string>('24h');
+  const [searchInput, setSearchInput] = useState('');
+  const search = useDebouncedValue(searchInput, 200);
+
+  const [pages, setPages] = useState<ActivityRow[][]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const PAGE = 20;
+  const [expandedAgg, setExpandedAgg] = useState<Set<string>>(new Set());
 
-  useEffect(() => { void load(0, true); }, []);
+  // Build the API query. Sources are repeatable; legacy/NULL is a synthetic
+  // option not understood by the backend — when it's the only source, ask
+  // the API for everything and filter client-side. When it's mixed in with
+  // real sources, ask for the real ones and union with NULL rows fetched
+  // separately… too expensive. Compromise: include legacy → drop the
+  // source filter and post-filter client-side.
+  const apiQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    const realSources = [...selectedSources].filter((s) => s !== '__legacy');
+    const includesLegacy = selectedSources.has('__legacy');
+    if (selectedSources.size > 0 && !includesLegacy) {
+      for (const s of realSources) params.append('source', s);
+    }
+    for (const s of selectedStatuses) params.append('status', s);
+    if (selectedAgent) params.set('agent', selectedAgent);
+    const preset = TIME_PRESETS.find((p) => p.key === timeKey);
+    if (preset && preset.secs != null) {
+      params.set('since', String(Math.floor(Date.now() / 1000) - preset.secs));
+    }
+    params.set('limit', String(PAGE_SIZE));
+    return { qs: params.toString(), includesLegacy, realSources };
+  }, [selectedSources, selectedStatuses, selectedAgent, timeKey]);
 
-  async function load(off: number, reset = false) {
-    setLoading(true); setError(null);
+  // Reset paging on filter/search change.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setPages([]);
+    setCursor(null);
+    setExpandedAgg(new Set());
+    apiGet<{ activity: ActivityRow[]; next_cursor: string | null }>(`/api/activity?${apiQuery.qs}`)
+      .then((d) => {
+        if (cancelled) return;
+        setPages([d.activity]);
+        setCursor(d.next_cursor);
+        setHasMore(d.next_cursor != null);
+      })
+      .catch((e: any) => {
+        if (cancelled) return;
+        setError(e?.message || String(e));
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [apiQuery.qs]);
+
+  async function loadMore() {
+    if (!cursor || loading) return;
+    setLoading(true);
     try {
-      const data = await apiGet<{ tasks: MissionTask[]; total: number }>(`/api/mission/history?limit=${PAGE}&offset=${off}`);
-      setTotal(data.total);
-      setItems(reset ? data.tasks : [...items, ...data.tasks]);
-      setOffset(off + data.tasks.length);
-    } catch (err: any) {
-      setError(err?.message || String(err));
+      const d = await apiGet<{ activity: ActivityRow[]; next_cursor: string | null }>(
+        `/api/activity?${apiQuery.qs}&cursor=${encodeURIComponent(cursor)}`,
+      );
+      setPages((p) => [...p, d.activity]);
+      setCursor(d.next_cursor);
+      setHasMore(d.next_cursor != null);
+    } catch (e: any) {
+      setError(e?.message || String(e));
     } finally { setLoading(false); }
   }
 
+  // Flatten + filter (legacy filter + client-side search).
+  const rows = useMemo(() => {
+    const flat = pages.flat();
+    let out = flat;
+    if (apiQuery.includesLegacy && apiQuery.realSources.length > 0) {
+      // user wants real sources OR null → include null + matched real
+      out = out.filter((r) => r.source == null || (apiQuery.realSources as string[]).includes(r.source));
+    } else if (apiQuery.includesLegacy) {
+      out = out.filter((r) => r.source == null);
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      out = out.filter((r) =>
+        r.title.toLowerCase().includes(q)
+        || (r.result_summary && r.result_summary.toLowerCase().includes(q))
+        || (r.source_label && r.source_label.toLowerCase().includes(q)),
+      );
+    }
+    return out;
+  }, [pages, apiQuery.includesLegacy, apiQuery.realSources, search]);
+
+  // Aggregation collapse: group rows by source_id when ≥AGG_THRESHOLD
+  // share the same source_id. Render order is preserved by inserting a
+  // single "roll-up" row at the position of the first occurrence and
+  // dropping the rest unless the group is expanded.
+  type Group = { kind: 'group'; source: string | null; sourceId: string; rows: ActivityRow[]; uniqueTitles: number };
+  type Item = { kind: 'row'; row: ActivityRow } | Group;
+
+  const items: Item[] = useMemo(() => {
+    // First pass: count occurrences per source_id (only when source_id exists).
+    const counts = new Map<string, number>();
+    for (const r of rows) {
+      if (r.source_id) counts.set(r.source_id, (counts.get(r.source_id) || 0) + 1);
+    }
+    const collapsedKeys = new Set<string>();
+    for (const [k, v] of counts.entries()) if (v >= AGG_THRESHOLD) collapsedKeys.add(k);
+
+    const out: Item[] = [];
+    const seenGroups = new Set<string>();
+    const groupRows = new Map<string, ActivityRow[]>();
+    for (const r of rows) {
+      if (r.source_id && collapsedKeys.has(r.source_id)) {
+        if (!seenGroups.has(r.source_id)) {
+          seenGroups.add(r.source_id);
+          const list: ActivityRow[] = [];
+          groupRows.set(r.source_id, list);
+          out.push({ kind: 'group', source: r.source, sourceId: r.source_id, rows: list, uniqueTitles: 0 });
+        }
+        groupRows.get(r.source_id)!.push(r);
+      } else {
+        out.push({ kind: 'row', row: r });
+      }
+    }
+    // Fill in uniqueTitles after the rows array is materialized.
+    for (const it of out) {
+      if (it.kind === 'group') {
+        it.uniqueTitles = new Set(it.rows.map((r) => r.title.slice(0, 100))).size;
+      }
+    }
+    return out;
+  }, [rows]);
+
+  // Find a kanban task card by id and scroll-pulse it. Used as the
+  // in-page "drawer" fallback for mission_cli / dashboard rows where no
+  // dedicated drawer exists. Bails silently if the card isn't mounted
+  // (task was filtered out, terminal, or just not in the current view).
+  function scrollToKanbanTask(taskId: string) {
+    if (typeof document === 'undefined') return;
+    const el = document.querySelector(`[data-task-id="${CSS.escape(taskId)}"]`) as HTMLElement | null;
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('kanban-pulse');
+    window.setTimeout(() => el.classList.remove('kanban-pulse'), 1600);
+  }
+
+  // Source label click → spec page (with source_id pre-selection params)
+  // for triggered / scheduled. mission_cli + dashboard rows scroll the
+  // kanban to the originating task and briefly highlight it (the kanban
+  // is the in-page "drawer" for those sources). Workflow rows scroll to
+  // the top of mission control (where the workflows banner would render
+  // once Slice 6 lands; for now this is a no-op visual cue).
+  //
+  // Triggered.tsx (Wave 1B) and Scheduled.tsx (Wave 1C, in main) do not
+  // yet read the slug/id query params — this is future-wiring. The
+  // params are harmless if ignored and correctly attribute the click
+  // intent for when those pages add pre-selection.
+  function navigateToSource(source: string | null, sourceId: string | null, taskId: string | null) {
+    if (source === 'webhook' || source === 'log-tail' || source === 'sqlite-poll') {
+      const qs = sourceId ? `?slug=${encodeURIComponent(sourceId)}` : '';
+      navigate(`/triggered${qs}`);
+    } else if (source === 'scheduled') {
+      const qs = sourceId ? `?id=${encodeURIComponent(sourceId)}` : '';
+      navigate(`/scheduled${qs}`);
+    } else if (source === 'mission_cli' || source === 'dashboard') {
+      // Kanban-scroll fallback: no separate task drawer exists yet, so
+      // scroll the matching kanban card into view and pulse it. Cards
+      // expose `data-task-id` for this lookup.
+      if (taskId) scrollToKanbanTask(taskId);
+    } else if (source === 'workflow') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+
+  function toggleSet<T>(set: Set<T>, v: T): Set<T> {
+    const next = new Set(set);
+    if (next.has(v)) next.delete(v); else next.add(v);
+    return next;
+  }
+
+  function clearFilters() {
+    setSelectedSources(new Set());
+    setSelectedStatuses(new Set());
+    setSelectedAgent('');
+    setTimeKey('24h');
+    setSearchInput('');
+  }
+
+  const filtersDirty =
+    selectedSources.size > 0 || selectedStatuses.size > 0 || selectedAgent !== ''
+    || timeKey !== '24h' || searchInput !== '';
+
   return (
-    <div class="px-6 py-4">
-      <div class="flex items-center gap-3 mb-3">
-        <div class="text-[12px] text-[var(--color-text-muted)] tabular-nums">{total} historical tasks</div>
-        {!loading && (
+    <div class="flex-1 min-h-0 flex flex-col border-t border-[var(--color-border)] bg-[var(--color-bg)]">
+      {/* Toolbar */}
+      <div class="shrink-0 px-4 py-2.5 border-b border-[var(--color-border)] flex items-center gap-2 flex-wrap" data-testid="activity-toolbar">
+        <div class="text-[11px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium mr-1">
+          Activity
+        </div>
+        <span class="text-[10.5px] text-[var(--color-text-faint)] tabular-nums">
+          {rows.length}{hasMore ? '+' : ''} rows
+        </span>
+
+        {/* Time presets */}
+        <div class="flex items-center gap-0.5 ml-2 bg-[var(--color-card)] border border-[var(--color-border)] rounded p-0.5">
+          {TIME_PRESETS.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => setTimeKey(p.key)}
+              data-testid={`activity-time-${p.key}`}
+              class={[
+                'px-2 py-0.5 rounded text-[11px] transition-colors',
+                timeKey === p.key
+                  ? 'bg-[var(--color-accent)] text-white'
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)]',
+              ].join(' ')}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Source multi-select */}
+        <ActivityMultiSelect
+          label="Source"
+          testId="activity-filter-source"
+          selected={selectedSources as Set<string>}
+          options={SOURCE_OPTIONS.map((o) => ({ key: o.key, label: o.label }))}
+          onToggle={(k) => setSelectedSources((s) => toggleSet(s, k as SourceKey))}
+        />
+
+        {/* Status multi-select */}
+        <ActivityMultiSelect
+          label="Status"
+          testId="activity-filter-status"
+          selected={selectedStatuses as Set<string>}
+          options={STATUS_OPTIONS.map((s) => ({ key: s, label: s }))}
+          onToggle={(k) => setSelectedStatuses((s) => toggleSet(s, k as ActivityRow['status']))}
+        />
+
+        {/* Agent single-select */}
+        <select
+          value={selectedAgent}
+          onChange={(e) => setSelectedAgent((e.target as HTMLSelectElement).value)}
+          data-testid="activity-filter-agent"
+          class="bg-[var(--color-card)] border border-[var(--color-border)] rounded px-2 py-1 text-[11.5px] text-[var(--color-text-muted)] outline-none focus:border-[var(--color-accent)]"
+        >
+          <option value="">All agents</option>
+          {agents.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}
+        </select>
+
+        {/* Search */}
+        <div class="relative flex-1 min-w-[140px] max-w-[240px]">
+          <Search size={12} class="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-text-faint)]" />
+          <input
+            type="text"
+            value={searchInput}
+            onInput={(e) => setSearchInput((e.target as HTMLInputElement).value)}
+            placeholder="Search title, result…"
+            data-testid="activity-search"
+            class="w-full bg-[var(--color-card)] border border-[var(--color-border)] rounded pl-7 pr-2 py-1 text-[11.5px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+          />
+        </div>
+
+        {filtersDirty && (
           <button
             type="button"
-            onClick={() => load(0, true)}
-            class="text-[11px] text-[var(--color-text-faint)] hover:text-[var(--color-text-muted)]"
+            onClick={clearFilters}
+            data-testid="activity-clear-filters"
+            class="px-2 py-1 rounded text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)]"
           >
-            ↻ Refresh
+            Clear
           </button>
         )}
       </div>
-      {error && (
-        <div class="bg-[var(--color-card)] border border-[var(--color-status-failed)] rounded p-3 mb-3">
-          <div class="text-[12px] text-[var(--color-status-failed)] font-medium mb-1">Failed to load history</div>
-          <div class="text-[11.5px] text-[var(--color-text-muted)] font-mono break-all">{error}</div>
-          <button
-            type="button"
-            onClick={() => load(0, true)}
-            class="mt-2 text-[11.5px] text-[var(--color-accent)] hover:underline"
-          >
-            Try again
-          </button>
-        </div>
-      )}
-      <div class="space-y-1.5">
-        {items.map((t) => (
-          <div key={t.id} class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded p-3">
-            <div class="flex items-center gap-2 mb-1">
-              <Pill tone={t.status as any}>{t.status}</Pill>
-              <span class="text-[10.5px] text-[var(--color-text-faint)] tabular-nums uppercase tracking-wider">{t.id.slice(0, 6)}</span>
-              {t.assigned_agent && <span class="text-[11px] text-[var(--color-text-muted)]">@{t.assigned_agent}</span>}
-              <span class="ml-auto text-[10.5px] text-[var(--color-text-faint)]">
-                {formatRelativeTime(t.completed_at || t.created_at)}
-              </span>
-            </div>
-            <div class="text-[13px] text-[var(--color-text)] mb-1">{t.title}</div>
-            {t.result && (
-              <div class="text-[11.5px] text-[var(--color-text-muted)] whitespace-pre-wrap line-clamp-3 leading-relaxed">{t.result}</div>
-            )}
-            {t.error && (
-              <div class="text-[11.5px] text-[var(--color-status-failed)] whitespace-pre-wrap line-clamp-2 font-mono">{t.error}</div>
-            )}
+
+      {/* Body */}
+      <div class="flex-1 min-h-0 overflow-y-auto" data-testid="activity-list">
+        {error && (
+          <div class="m-4 bg-[var(--color-card)] border border-[var(--color-status-failed)] rounded p-3">
+            <div class="text-[12px] text-[var(--color-status-failed)] font-medium mb-1">Failed to load activity</div>
+            <div class="text-[11.5px] text-[var(--color-text-muted)] font-mono break-all">{error}</div>
           </div>
-        ))}
-      </div>
-      {offset < total && (
-        <button
-          type="button"
-          onClick={() => load(offset)}
-          disabled={loading}
-          class="w-full mt-3 px-3 py-2 rounded border border-[var(--color-border)] text-[12.5px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors disabled:opacity-40"
-        >
-          {loading ? 'Loading…' : `Load more (${total - offset} remaining)`}
-        </button>
-      )}
-      {items.length === 0 && !loading && !error && (
-        <div class="text-center text-[11.5px] text-[var(--color-text-faint)] py-12">No completed tasks yet</div>
-      )}
-    </div>
-  );
-}
+        )}
 
-// ── Slice 6 — Workflows banner ───────────────────────────────────────
-// Compact strip rendered above the kanban that surfaces active /
-// recently-finished workflow runs. Each run row expands into a stage
-// breakdown drawer; council stages render side-by-side per the spec.
+        {!error && !loading && items.length === 0 && (
+          <ActivityEmptyState
+            timeKey={timeKey}
+            onJump={(k) => setTimeKey(k)}
+          />
+        )}
 
-interface WorkflowRun {
-  id: string;
-  workflow_slug: string;
-  current_stage: number;
-  state: 'queued' | 'running' | 'approved' | 'escalated' | 'done' | 'failed';
-  started_at: number;
-  finished_at: number | null;
-  payload_json: string;
-  created_by: string;
-}
-
-interface WorkflowStage {
-  id: number;
-  run_id: string;
-  stage_idx: number;
-  stage_type: 'sequential' | 'council';
-  agent_id: string;
-  mission_task_id: string | null;
-  verdict: string | null;
-  output: string | null;
-  attempt: number;
-  started_at: number | null;
-  finished_at: number | null;
-}
-
-const WF_VISIBLE_SECS = 7 * 24 * 60 * 60; // keep finished runs visible for 7 days
-
-function WorkflowsBanner() {
-  const runs = useFetch<{ runs: WorkflowRun[] }>('/api/workflows/runs?limit=20', 15_000);
-  const [openRunId, setOpenRunId] = useState<string | null>(null);
-
-  const visible = useMemo(() => {
-    const all = runs.data?.runs ?? [];
-    const now = Date.now() / 1000;
-    return all.filter((r) => {
-      if (r.state === 'queued' || r.state === 'running') return true;
-      if (!r.finished_at) return true;
-      return now - r.finished_at < WF_VISIBLE_SECS;
-    });
-  }, [runs.data]);
-
-  if (visible.length === 0) return null;
-
-  return (
-    <div class="px-4 pt-3 pb-1">
-      <div class="flex items-center gap-2 mb-2 text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider">
-        <WorkflowIcon size={13} />
-        Workflows
-        <span class="text-[10px] text-[var(--color-text-faint)] tabular-nums">({visible.length})</span>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        {visible.map((r) => (
-          <button
-            key={r.id}
-            type="button"
-            onClick={() => setOpenRunId(r.id)}
-            class="text-left px-3 py-2 rounded-md bg-[var(--color-card)] border border-[var(--color-border)] hover:border-[var(--color-accent)] transition-colors min-w-[220px]"
-          >
-            <div class="flex items-center gap-2">
-              <StatusDot tone={mapWfStateToTone(r.state)} />
-              <span class="text-[12px] font-medium text-[var(--color-text)] truncate">{r.workflow_slug}</span>
-              <span class="ml-auto text-[10px] text-[var(--color-text-faint)]">{r.id.slice(0, 6)}</span>
-            </div>
-            <div class="text-[10.5px] text-[var(--color-text-muted)] mt-0.5">
-              stage {r.current_stage} · {r.state}
-            </div>
-          </button>
-        ))}
-      </div>
-      <Drawer open={!!openRunId} onClose={() => setOpenRunId(null)} title={openRunId ? `Workflow ${openRunId.slice(0, 8)}` : 'Workflow'}>
-        {openRunId && <WorkflowDetail runId={openRunId} />}
-      </Drawer>
-    </div>
-  );
-}
-
-function mapWfStateToTone(state: WorkflowRun['state']): 'queued' | 'running' | 'done' | 'failed' | 'cancelled' {
-  switch (state) {
-    case 'queued':
-      return 'queued';
-    case 'running':
-      return 'running';
-    case 'done':
-    case 'approved':
-      return 'done';
-    case 'failed':
-      return 'failed';
-    case 'escalated':
-      return 'cancelled';
-    default:
-      return 'queued';
-  }
-}
-
-function WorkflowDetail({ runId }: { runId: string }) {
-  const detail = useFetch<{ run: WorkflowRun; stages: WorkflowStage[]; payload: { input?: string; outputs?: Record<string, string>; last_error?: string } }>(`/api/workflows/runs/${runId}`, 5_000);
-  if (detail.error) return <div class="p-3 text-[12px] text-[var(--color-status-failed)]">Failed to load: {String(detail.error)}</div>;
-  if (!detail.data) return <div class="p-3 text-[12px] text-[var(--color-text-muted)]">Loading…</div>;
-  const { run, stages, payload } = detail.data;
-  // Group stages by stage_idx — one group per logical stage. Sequential
-  // groups will have 1 entry; council groups will have N entries that
-  // render side-by-side.
-  const byIdx: Record<number, WorkflowStage[]> = {};
-  for (const s of stages) (byIdx[s.stage_idx] ??= []).push(s);
-  const idxs = Object.keys(byIdx).map((k) => Number(k)).sort((a, b) => a - b);
-
-  return (
-    <div class="p-3 space-y-3">
-      <div class="text-[12px] text-[var(--color-text-muted)]">
-        <div><span class="font-mono">{run.id}</span></div>
-        <div>slug: <span class="font-mono">{run.workflow_slug}</span> · state: <span class="font-mono">{run.state}</span></div>
-        <div>created by: {run.created_by}</div>
-      </div>
-      {payload.input && (
-        <div>
-          <div class="text-[10.5px] text-[var(--color-text-faint)] uppercase tracking-wider mb-1">Input</div>
-          <div class="text-[12px] text-[var(--color-text)] whitespace-pre-wrap font-mono bg-[var(--color-elevated)] p-2 rounded">{payload.input}</div>
-        </div>
-      )}
-      {payload.last_error && (
-        <div>
-          <div class="text-[10.5px] text-[var(--color-status-failed)] uppercase tracking-wider mb-1">Last error</div>
-          <div class="text-[12px] text-[var(--color-status-failed)] whitespace-pre-wrap font-mono bg-[var(--color-elevated)] p-2 rounded">{payload.last_error}</div>
-        </div>
-      )}
-      <div class="space-y-3">
-        {idxs.map((idx) => (
-          <div key={idx} class="border border-[var(--color-border)] rounded-md p-2 bg-[var(--color-card)]">
-            <div class="text-[10.5px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1.5">
-              stage {idx} · {byIdx[idx]![0]!.stage_type}
-            </div>
-            <div class={byIdx[idx]!.length > 1 ? 'grid grid-cols-1 md:grid-cols-3 gap-2' : 'space-y-2'}>
-              {byIdx[idx]!.map((s) => (
-                <div key={s.id} class="bg-[var(--color-elevated)] rounded p-2">
-                  <div class="flex items-center gap-2">
-                    <span class="text-[12px] font-medium text-[var(--color-text)]">{s.agent_id}</span>
-                    <span class="text-[10.5px] text-[var(--color-text-muted)] tabular-nums">attempt {s.attempt}</span>
-                    {s.verdict && (
-                      <Pill tone={s.verdict === 'APPROVED' ? 'done' : s.verdict === 'REJECTED' ? 'failed' : 'neutral'}>
-                        {s.verdict}
-                      </Pill>
-                    )}
-                  </div>
-                  {s.output && (
-                    <div class="text-[11.5px] text-[var(--color-text-muted)] whitespace-pre-wrap mt-1 line-clamp-6">{s.output}</div>
-                  )}
+        <div class="divide-y divide-[var(--color-border)]">
+          {items.map((it, idx) => {
+            if (it.kind === 'group') {
+              const expanded = expandedAgg.has(it.sourceId);
+              return (
+                <div key={'g:' + it.sourceId} data-testid="activity-group">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedAgg((s) => {
+                      const n = new Set(s);
+                      if (n.has(it.sourceId)) n.delete(it.sourceId); else n.add(it.sourceId);
+                      return n;
+                    })}
+                    class="w-full px-4 py-2 flex items-center gap-3 text-left hover:bg-[var(--color-elevated)] transition-colors"
+                    data-testid={`activity-group-toggle-${it.sourceId}`}
+                  >
+                    <SourceIcon source={it.source} />
+                    <span class="text-[12.5px] text-[var(--color-text)] font-medium">{it.sourceId}</span>
+                    <span class="text-[11.5px] text-[var(--color-text-muted)]">
+                      · {it.rows.length} fires in window
+                    </span>
+                    <span class="text-[11px] text-[var(--color-text-faint)]">
+                      ({it.uniqueTitles} unique payload{it.uniqueTitles === 1 ? '' : 's'})
+                    </span>
+                    <span class="ml-auto text-[var(--color-text-muted)]">
+                      {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </span>
+                  </button>
+                  {expanded && it.rows.map((r) => (
+                    <ActivityRowItem
+                      key={r.id}
+                      row={r}
+                      indent
+                      onSourceClick={() => navigateToSource(r.source, r.source_id, r.id)}
+                    />
+                  ))}
                 </div>
-              ))}
-            </div>
+              );
+            }
+            return (
+              <ActivityRowItem
+                key={it.row.id + ':' + idx}
+                row={it.row}
+                onSourceClick={() => navigateToSource(it.row.source, it.row.source_id, it.row.id)}
+              />
+            );
+          })}
+        </div>
+
+        {hasMore && (
+          <div class="p-3">
+            <button
+              type="button"
+              onClick={loadMore}
+              disabled={loading}
+              data-testid="activity-load-more"
+              class="w-full px-3 py-2 rounded border border-[var(--color-border)] text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors disabled:opacity-40"
+            >
+              {loading ? 'Loading…' : `Load ${PAGE_SIZE} more`}
+            </button>
           </div>
-        ))}
+        )}
+
+        {loading && items.length === 0 && (
+          <div class="text-center text-[11.5px] text-[var(--color-text-faint)] py-6">Loading activity…</div>
+        )}
       </div>
+    </div>
+  );
+}
+
+function ActivityEmptyState({
+  timeKey, onJump,
+}: { timeKey: string; onJump: (k: string) => void }) {
+  const wider = TIME_PRESETS.filter((p) => {
+    const cur = TIME_PRESETS.find((q) => q.key === timeKey);
+    if (!cur) return true;
+    if (cur.secs == null) return false;
+    if (p.secs == null) return true;
+    return p.secs > cur.secs;
+  });
+  return (
+    <div class="text-center py-12 px-4" data-testid="activity-empty">
+      <div class="text-[12.5px] text-[var(--color-text-muted)] mb-3">
+        No activity in the {timeKey === 'all' ? 'window' : 'last ' + timeKey}.
+      </div>
+      {wider.length > 0 && (
+        <div class="flex items-center justify-center gap-2 text-[11.5px]">
+          <span class="text-[var(--color-text-faint)]">Switch to:</span>
+          {wider.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => onJump(p.key)}
+              data-testid={`activity-jump-${p.key}`}
+              class="px-2 py-0.5 rounded border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)]"
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SourceIcon({ source }: { source: string | null }) {
+  // Use lucide icons for crisp rendering instead of emoji glyphs which
+  // break visual alignment across OSes.
+  const map: Record<string, any> = {
+    webhook: Zap,
+    scheduled: Calendar,
+    workflow: GitBranch,
+    manual: User,
+    mission_cli: User,
+    'log-tail': Radio,
+    'sqlite-poll': Radio,
+  };
+  const Icon = source ? (map[source] ?? HelpCircle) : HelpCircle;
+  const { tone } = sourceBadge(source);
+  return (
+    <span class="inline-flex items-center justify-center w-5 h-5 rounded shrink-0" style={{ color: tone }}>
+      <Icon size={13} />
+    </span>
+  );
+}
+
+function ActivityRowItem({
+  row, indent, onSourceClick,
+}: { row: ActivityRow; indent?: boolean; onSourceClick: () => void }) {
+  const slug = sourceSlug(row.source_label);
+  const tone = statusTone(row.status);
+  return (
+    <div
+      class={[
+        'px-4 py-2 hover:bg-[var(--color-elevated)] transition-colors flex items-start gap-3',
+        indent ? 'pl-10' : '',
+      ].join(' ')}
+      data-testid="activity-row"
+      data-source={row.source ?? '__legacy'}
+      data-status={row.status}
+      data-agent={row.agent_id ?? ''}
+    >
+      <SourceIcon source={row.source} />
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 min-w-0">
+          {row.agent_id && (
+            <span class="text-[11.5px] text-[var(--color-text-muted)] font-mono shrink-0">
+              {row.agent_id}
+            </span>
+          )}
+          <span class="text-[12.5px] text-[var(--color-text)] truncate">{row.title}</span>
+        </div>
+        <div class="flex items-center gap-1.5 text-[10.5px] text-[var(--color-text-faint)] mt-0.5">
+          <span class="text-[var(--color-text-muted)]">↳</span>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onSourceClick(); }}
+            class="hover:text-[var(--color-accent)] hover:underline"
+            data-testid="activity-source-link"
+          >
+            {row.source ?? 'unknown'} · {slug}
+          </button>
+        </div>
+      </div>
+      <div class="shrink-0 flex items-center gap-2 text-[10.5px] tabular-nums">
+        <span class="text-[var(--color-text-faint)]">{formatRelativeTime(row.created_at)}</span>
+        <Pill tone={tone}>{row.status}</Pill>
+        <span class="text-[var(--color-text-muted)] w-12 text-right">
+          {row.duration_ms != null ? formatDuration(row.duration_ms) : ''}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ActivityMultiSelect({
+  label, testId, selected, options, onToggle,
+}: {
+  label: string;
+  testId: string;
+  selected: Set<string>;
+  options: { key: string; label: string }[];
+  onToggle: (k: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onEsc(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false); }
+    document.addEventListener('click', onClick);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('click', onClick);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [open]);
+  const count = selected.size;
+  return (
+    <div ref={ref} class="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        data-testid={testId}
+        class={[
+          'inline-flex items-center gap-1 px-2 py-1 rounded text-[11.5px] border transition-colors',
+          count > 0
+            ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+            : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)]',
+        ].join(' ')}
+      >
+        {label} {count > 0 && <span class="tabular-nums">({count})</span>}
+        <ChevronDown size={11} />
+      </button>
+      {open && (
+        <div class="absolute left-0 top-full mt-1 z-30 min-w-[180px] bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg shadow-xl overflow-hidden">
+          {options.map((o) => {
+            const checked = selected.has(o.key);
+            return (
+              <button
+                key={o.key}
+                type="button"
+                onClick={() => onToggle(o.key)}
+                data-testid={`${testId}-opt-${o.key}`}
+                class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
+              >
+                <span class={[
+                  'inline-flex items-center justify-center w-3.5 h-3.5 rounded border',
+                  checked ? 'bg-[var(--color-accent)] border-[var(--color-accent)] text-white' : 'border-[var(--color-border)]',
+                ].join(' ')}>
+                  {checked && <Check size={10} />}
+                </span>
+                <span>{o.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -204,6 +204,19 @@ input, textarea, select {
 }
 .animate-toast-in { animation: toast-in 160ms ease-out; }
 
+/* Slice 9 Wave 1A — kanban scroll-pulse highlight applied when an
+   Activity row of source=mission_cli/dashboard is clicked. The matching
+   TaskCard scrolls into view, then briefly outlines in the accent
+   colour so the eye lands on it. Class is added/removed by JS. */
+@keyframes kanban-pulse-frames {
+  0%   { box-shadow: 0 0 0 0   var(--color-accent, #6c8cff); }
+  40%  { box-shadow: 0 0 0 4px var(--color-accent, #6c8cff); }
+  100% { box-shadow: 0 0 0 0   transparent; }
+}
+.kanban-pulse {
+  animation: kanban-pulse-frames 1500ms ease-out;
+}
+
 /* Privacy blur — used on Memories + Hive Mind summaries when the user
    wants the page screenshot-safe. Click-to-reveal per row, hover lightens
    so you can preview without committing. The .revealed class trumps the

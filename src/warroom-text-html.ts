@@ -784,16 +784,52 @@ export function getWarRoomTextHtml(token: string, chatId: string, meetingId: str
     margin-bottom: 6px;
     min-width: 320px;
     max-width: 420px;
-    max-height: 320px;
-    overflow-y: auto;
+    max-height: 360px;
+    /* The popup itself is now a flex container so the search bar at the
+       top stays pinned while the list (.slash-list) scrolls beneath. */
+    display: flex;
+    flex-direction: column;
     background: var(--bg-elev-2);
     border: 1px solid var(--border-strong);
     border-radius: 10px;
     box-shadow: 0 14px 40px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.2);
     z-index: 50;
-    padding: 4px;
+    overflow: hidden;
   }
   .slash-popup[hidden] { display: none; }
+  /* Search bar at the top of the slash popup — same vibe as Claude Code's
+     slash menu. Filters the list live across orch + skills. */
+  .slash-search {
+    flex-shrink: 0;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elev-2);
+  }
+  .slash-search input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+  }
+  .slash-search input::placeholder { color: var(--text-mute); }
+  .slash-search input:focus { border-color: var(--indigo); box-shadow: 0 0 0 2px rgba(99,102,241,0.25); }
+  .slash-list {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 4px;
+  }
+  .slash-empty {
+    padding: 14px 12px;
+    font-size: 12px;
+    color: var(--text-mute);
+    text-align: center;
+  }
   .slash-item {
     display: flex; align-items: baseline; gap: 10px;
     padding: 8px 10px;
@@ -2580,19 +2616,102 @@ const commandsBtnEl = document.getElementById('btn-commands');
 let slashMatches = [];
 let slashIndex = 0;
 let slashPersistent = false; // true when opened by the Commands button (no auto-close on input change)
+let slashSearchQuery = ''; // current text in the search input
 
+// Token-aware match: every whitespace-separated token in the query must
+// appear somewhere in name OR label. So "git push" matches a "git-helper"
+// skill described as "push branches and create PRs". This widens the
+// filter beyond the old prefix-only match without being noisy — typing
+// "/" followed by nothing still shows everything.
 function slashFilter(query) {
-  const q = (query || '').toLowerCase();
+  const q = (query || '').toLowerCase().trim();
   const all = SLASH_COMMANDS();
-  return all.filter((c) => !q || c.name.toLowerCase().startsWith(q));
+  if (!q) return all;
+  const tokens = q.split(/\\s+/).filter(Boolean);
+  return all.filter((c) => {
+    const hay = ((c.name || '') + ' ' + (c.label || '')).toLowerCase();
+    return tokens.every((t) => hay.includes(t));
+  });
 }
 
-function renderSlashPopup() {
+// Build the popup chrome ONCE when it's opened. Subsequent filter updates
+// only re-render .slash-list — the search input keeps its focus and
+// caret position because we never recreate it.
+function buildSlashPopupChrome() {
   slashPopupEl.innerHTML = '';
-  const hint = document.createElement('div');
-  hint.className = 'mention-hint';
-  hint.textContent = slashPersistent ? 'slash commands' : 'matching /';
-  slashPopupEl.appendChild(hint);
+
+  // Search bar — only rendered for persistent (button-opened) popups.
+  // The inline /-typed flow uses the composer itself as the input, so a
+  // second search box would just confuse focus.
+  if (slashPersistent) {
+    const searchWrap = document.createElement('div');
+    searchWrap.className = 'slash-search';
+    const input = document.createElement('input');
+    input.type = 'search';
+    input.id = 'slash-search-input';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.setAttribute('aria-label', 'Search slash commands');
+    input.placeholder = 'Search commands…';
+    input.value = slashSearchQuery;
+    input.addEventListener('input', () => {
+      slashSearchQuery = input.value;
+      slashMatches = slashFilter(slashSearchQuery);
+      slashIndex = 0;
+      renderSlashList();
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        slashIndex = Math.min(slashMatches.length - 1, slashIndex + 1);
+        renderSlashList();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        slashIndex = Math.max(0, slashIndex - 1);
+        renderSlashList();
+      } else if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        selectSlash(slashIndex);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeSlashPopup();
+        composerEl.focus();
+      }
+    });
+    searchWrap.appendChild(input);
+    slashPopupEl.appendChild(searchWrap);
+  }
+
+  // Empty hint kept for the inline (typed) popup so its visual chrome
+  // matches the previous build (mention-popup style).
+  if (!slashPersistent) {
+    const hint = document.createElement('div');
+    hint.className = 'mention-hint';
+    hint.textContent = 'matching /';
+    slashPopupEl.appendChild(hint);
+  }
+
+  const list = document.createElement('div');
+  list.className = 'slash-list';
+  list.id = 'slash-list';
+  slashPopupEl.appendChild(list);
+}
+
+function renderSlashList() {
+  const list = slashPopupEl.querySelector('#slash-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  if (slashMatches.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'slash-empty';
+    empty.textContent = slashSearchQuery
+      ? 'No commands match "' + slashSearchQuery + '"'
+      : 'No commands available';
+    list.appendChild(empty);
+    return;
+  }
+
   let lastKind = null;
   slashMatches.forEach((c, i) => {
     // Insert a divider between the orchestration block and the skills block
@@ -2601,7 +2720,7 @@ function renderSlashPopup() {
       const div = document.createElement('div');
       div.className = 'slash-divider';
       div.setAttribute('role', 'separator');
-      slashPopupEl.appendChild(div);
+      list.appendChild(div);
     }
     lastKind = c.kind;
     const row = document.createElement('div');
@@ -2633,10 +2752,30 @@ function renderSlashPopup() {
       e.preventDefault();
       selectSlash(i);
     });
-    slashPopupEl.appendChild(row);
+    list.appendChild(row);
   });
+
+  // Keep the active row in view when arrow keys move past the visible
+  // window — without this the selection silently scrolls off.
+  const activeRow = list.querySelector('.slash-item.active');
+  if (activeRow && typeof activeRow.scrollIntoView === 'function') {
+    activeRow.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function showSlashPopup() {
+  buildSlashPopupChrome();
+  renderSlashList();
   slashPopupEl.hidden = false;
   if (commandsBtnEl) commandsBtnEl.setAttribute('aria-expanded', 'true');
+  // Auto-focus the search input on persistent open so typing immediately
+  // filters. setTimeout lets the input mount before focus().
+  if (slashPersistent) {
+    const input = slashPopupEl.querySelector('#slash-search-input');
+    if (input) {
+      setTimeout(() => { try { input.focus(); input.select(); } catch {} }, 0);
+    }
+  }
 }
 
 function updateSlashPopup() {
@@ -2646,19 +2785,23 @@ function updateSlashPopup() {
   const value = composerEl.value;
   const m = value.match(/^\\/([a-z]*)$/i);
   if (!m) { closeSlashPopup(); return; }
+  // Don't blow away a persistent popup just because the composer changed.
+  if (slashPersistent) return;
   slashPersistent = false;
-  const matches = slashFilter(m[1]);
+  slashSearchQuery = m[1];
+  const matches = slashFilter(slashSearchQuery);
   if (matches.length === 0) { closeSlashPopup(); return; }
   slashMatches = matches;
   slashIndex = 0;
-  renderSlashPopup();
+  showSlashPopup();
 }
 
 function openSlashPopupPersistent() {
   slashPersistent = true;
+  slashSearchQuery = '';
   slashMatches = SLASH_COMMANDS();
   slashIndex = 0;
-  renderSlashPopup();
+  showSlashPopup();
 }
 
 function closeSlashPopup() {
@@ -2666,16 +2809,17 @@ function closeSlashPopup() {
   slashMatches = [];
   slashIndex = 0;
   slashPersistent = false;
+  slashSearchQuery = '';
   if (commandsBtnEl) commandsBtnEl.setAttribute('aria-expanded', 'false');
 }
 
 function selectSlash(idx) {
   const c = slashMatches[idx];
   if (!c) { closeSlashPopup(); return; }
-  // Replace the whole composer value when triggered persistently OR
-  // when typed inline (which is also at the start of the string). In
-  // both cases the user is at the slash, so set the composer to the
-  // command + (trailing space if it takes an argument).
+  // Replace the whole composer value. In both inline-/typed and
+  // persistent-button-opened modes the user is essentially saying "I want
+  // this command", so we drop them at the end of "/<name> " ready to
+  // fill in args.
   const next = '/' + c.name + (c.arg ? ' ' : '');
   composerEl.value = next;
   composerEl.focus();
@@ -2692,7 +2836,7 @@ if (commandsBtnEl) {
       composerEl.focus();
     } else {
       openSlashPopupPersistent();
-      composerEl.focus();
+      // Don't refocus the composer — we want focus in the search input.
     }
   });
 }
@@ -2804,18 +2948,21 @@ composerEl.addEventListener('input', () => {
   if (!slashPersistent) updateSlashPopup();
 });
 composerEl.addEventListener('keydown', (e) => {
-  // Slash popup keys take priority when it's open
-  if (!slashPopupEl.hidden) {
+  // Slash popup keys take priority when it's open AND the composer
+  // (not the search input) has focus. The persistent popup wires its own
+  // arrow/Enter/Esc handlers on the search input, so this branch only
+  // fires for the inline (typed) flow where focus stays on the composer.
+  if (!slashPopupEl.hidden && !slashPersistent) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       slashIndex = Math.min(slashMatches.length - 1, slashIndex + 1);
-      renderSlashPopup();
+      renderSlashList();
       return;
     }
     if (e.key === 'ArrowUp') {
       e.preventDefault();
       slashIndex = Math.max(0, slashIndex - 1);
-      renderSlashPopup();
+      renderSlashList();
       return;
     }
     if (e.key === 'Enter' || e.key === 'Tab') {

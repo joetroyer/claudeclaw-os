@@ -251,7 +251,7 @@ input, textarea, select {
 /* Vertical trunk between a parent card and its children's bus. */
 .org-chart-trunk {
   width: 1px;
-  height: 16px;
+  height: 12px;
   background: var(--color-border-strong);
   flex-shrink: 0;
 }
@@ -272,9 +272,9 @@ input, textarea, select {
    anchor to it. Padding-top reserves room for the connectors. */
 .org-chart-child {
   position: relative;
-  padding-top: 16px;        /* connector space above the card */
-  padding-left: 8px;
-  padding-right: 8px;
+  padding-top: 14px;        /* connector space above the card */
+  padding-left: 4px;
+  padding-right: 4px;
   flex: 0 0 auto;           /* don't shrink — keep card width */
 }
 
@@ -286,7 +286,7 @@ input, textarea, select {
   top: 0;
   left: 50%;
   width: 1px;
-  height: 16px;
+  height: 14px;
   background: var(--color-border-strong);
   transform: translateX(-0.5px);
   pointer-events: none;
@@ -318,6 +318,47 @@ input, textarea, select {
    instead of wrapping (wrapping breaks the bus visualization). */
 .org-chart-canvas-scroll {
   overflow-x: auto;
+}
+
+/* Mobile (<640px) — fall back to a vertical stack so cards remain
+   readable. The horizontal bus would compress to invisible at that
+   width anyway; vertical drops + indent rails read better on phones. */
+@media (max-width: 639.5px) {
+  .org-chart-children-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .org-chart-child {
+    padding-top: 0;
+    padding-left: 16px;
+    padding-bottom: 8px;
+  }
+  .org-chart-child::before {
+    /* On mobile, use a left-edge rail (Wave 2 style) instead of a top vertical */
+    top: 12px;
+    left: 0;
+    width: 1px;
+    height: calc(100% - 12px);
+    transform: none;
+  }
+  .org-chart-child::after {
+    /* Horizontal stub from the left rail to the card top */
+    top: 12px;
+    left: 0;
+    right: auto;
+    width: 16px;
+    height: 1px;
+  }
+  .org-chart-child:first-child::after,
+  .org-chart-child:last-child::after,
+  .org-chart-child:only-child::after {
+    /* Reset the desktop trim variants — every child gets a stub */
+    left: 0;
+    right: auto;
+    display: block;
+  }
+  .org-chart-trunk { display: none; }
+  .org-chart-card { width: 100% !important; max-width: 100% !important; }
 }
 
 /* Privacy blur — used on Memories + Hive Mind summaries when the user

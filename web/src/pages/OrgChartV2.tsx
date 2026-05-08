@@ -358,6 +358,66 @@ export function OrgChartV2() {
     writeUrlState(focusId, Array.from(expanded));
   }, [focusId, expanded]);
 
+  // Slice 10 Wave 4 — auto-fit the tree when its natural width exceeds
+  // the canvas. Mirrors Callan's reference (her 0:36s frame zooms the
+  // whole 17-node chart down so it fits a single screen).
+  //
+  // Approach: measure the inner column's natural width, then if it
+  // overflows, apply CSS transform: scale() AND set a negative margin
+  // so the post-transform layout space matches the visual size. This
+  // dodges the gotcha that `transform` doesn't change layout box, so
+  // without the margin the parent still thinks the tree is huge.
+  const treeInnerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function recompute() {
+      const canvas = document.querySelector('[data-testid="org-chart-v2-canvas"]') as HTMLElement | null;
+      const inner = treeInnerRef.current;
+      if (!canvas || !inner) return;
+      // Clear transform + margins before measuring.
+      inner.style.transform = '';
+      inner.style.marginLeft = '';
+      inner.style.marginRight = '';
+      inner.style.marginBottom = '';
+      // Skip auto-scaling on mobile (CSS falls back to a vertical
+      // stack <640px so the natural width is fine).
+      if (window.matchMedia('(max-width: 639.5px)').matches) {
+        inner.dataset.autoScale = '1';
+        return;
+      }
+      const naturalWidth = inner.scrollWidth;
+      const naturalHeight = inner.scrollHeight;
+      const visible = canvas.clientWidth - 16;
+      if (naturalWidth <= visible) {
+        inner.dataset.autoScale = '1';
+        return;
+      }
+      // Don't shrink below 0.42 so cards stay legible. Below that we
+      // allow horizontal scroll on the canvas for the remainder.
+      const ratio = Math.max(0.42, visible / naturalWidth);
+      inner.style.transform = `scale(${ratio.toFixed(3)})`;
+      inner.dataset.autoScale = ratio.toFixed(3);
+      // Compensate for the layout box not shrinking with transform.
+      // Negative side margins of (1-ratio)/2 * naturalWidth on each
+      // side pull the visual width down to match the scaled content.
+      // Bottom margin pulls following content up by the height delta.
+      const mx = (1 - ratio) * naturalWidth / 2;
+      const mb = (1 - ratio) * naturalHeight;
+      inner.style.marginLeft = `-${mx}px`;
+      inner.style.marginRight = `-${mx}px`;
+      inner.style.marginBottom = `-${mb}px`;
+      requestAnimationFrame(() => { canvas.scrollLeft = 0; });
+    }
+    // First paint after the children DOM has settled, then resize.
+    const raf1 = requestAnimationFrame(recompute);
+    const raf2 = requestAnimationFrame(() => requestAnimationFrame(recompute));
+    window.addEventListener('resize', recompute);
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      window.removeEventListener('resize', recompute);
+    };
+  }, [roots, expanded, focusId]);
+
   // Search.
   const [searchRaw, setSearchRaw] = useState('');
   const search = useDebouncedValue(searchRaw, 200);
@@ -588,12 +648,19 @@ export function OrgChartV2() {
           }}
           data-testid="org-chart-v2-canvas"
         >
-          {/* Slice 10 Wave 4 — horizontal sibling layout. The tree fans
-              out wide; we let the canvas grow as wide as it needs and
-              scroll horizontally for big rows rather than wrapping
-              (wrapping breaks the connector-bus visualization). */}
-          <div class="inline-flex flex-col items-center min-w-full">
-            <div class="flex flex-row items-start justify-center gap-6">
+          {/* Slice 10 Wave 4 — horizontal sibling layout. When the
+              natural tree width exceeds the canvas we auto-scale the
+              inner column down (mirrors Callan's zoomed-out chart) so
+              the full 17-node tree lands on one screen without scroll.
+              transform-origin: top means the scale anchors at the top
+              centre, keeping the founder card in the same vertical spot. */}
+          <div
+            ref={treeInnerRef}
+            class="inline-flex flex-col items-center min-w-full"
+            style={{ transformOrigin: 'top center' }}
+            data-testid="org-chart-v2-tree-inner"
+          >
+            <div class="flex flex-row items-start justify-center gap-4">
               {rootsToRender().map((r) => (
                 <NodeBranch
                   key={r.id}
@@ -972,14 +1039,15 @@ function NodeCard(p: CardProps) {
       ? p.node.four_rs.responsibilities[0]
       : '';
 
-  // Slice 10 Wave 4 — compact 240px card form factor. Targets ~5
-  // siblings per row at 1280px and a two-row card height. Mobile keeps
-  // a fluid full-width fallback under 400px so cards don't get clipped.
+  // Slice 10 Wave 4 — compact 220px card form factor. Targets ~5
+  // siblings per row at 1280px (5 × 220 + 4 × 8 = 1132px, within
+  // the canvas after sidenav). Two-row card height. Mobile gets a
+  // fluid full-width fallback so cards don't get clipped.
   return (
     <div
       class={[
         'org-chart-card relative rounded-lg border bg-[var(--color-card)] transition-all shadow-sm',
-        'w-[240px] max-w-[240px]',
+        'w-[220px] max-w-[220px]',
         p.dimmed ? 'opacity-40' : 'opacity-100',
         p.highlighted ? 'ring-2 ring-[var(--color-accent)]' : '',
         'border-[var(--color-border)] hover:border-[var(--color-border-strong)]',
@@ -989,8 +1057,8 @@ function NodeCard(p: CardProps) {
       data-node-type={p.node.type}
       data-node-lob={p.node.lob ?? ''}
     >
-      {/* ── header row: avatar · (name + role + first-resp + skills) · LOB pill · menu ── */}
-      <div class="flex items-start gap-2 px-2.5 pt-2.5 pb-1.5">
+      {/* ── header row: avatar + name + menu ── */}
+      <div class="flex items-start gap-1.5 px-2 pt-2 pb-1">
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); p.onAvatar(); }}
@@ -1000,12 +1068,12 @@ function NodeCard(p: CardProps) {
           <AgentAvatar agentId={p.node.id} name={p.node.name} size={32} running={p.node.running ?? undefined} src={p.node.avatar || undefined} />
         </button>
 
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-1">
+        <div class="flex-1 min-w-0 pt-0.5">
+          <div class="flex items-center gap-1 min-w-0">
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); p.onTitle(); }}
-              class="flex-1 min-w-0 min-h-[44px] inline-flex items-center text-[13px] font-semibold leading-tight text-[var(--color-text)] hover:text-[var(--color-accent)] transition-colors text-left truncate"
+              class="flex-1 min-w-0 min-h-[28px] inline-flex items-center text-[13px] font-semibold leading-tight text-[var(--color-text)] hover:text-[var(--color-accent)] transition-colors text-left truncate"
               data-testid={`org-chart-v2-title-${p.node.id}`}
               title={p.node.name}
             >
@@ -1017,7 +1085,7 @@ function NodeCard(p: CardProps) {
               data-testid={`org-chart-v2-badge-${p.node.id}`}
               aria-label={`Filter to ${p.node.type}`}
               title={`Filter to ${isHuman ? 'humans' : 'AI'}`}
-              class="shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded hover:bg-[var(--color-elevated)] transition-colors"
+              class="shrink-0 min-h-[28px] min-w-[28px] inline-flex items-center justify-center rounded hover:bg-[var(--color-elevated)] transition-colors"
             >
               {isHuman
                 ? <User size={11} class="text-[var(--color-text-faint)]" />
@@ -1027,64 +1095,19 @@ function NodeCard(p: CardProps) {
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); p.onSubtitle(); }}
-            class="block w-full min-h-[44px] text-[11px] leading-snug text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors text-left truncate"
+            class="block w-full min-h-[16px] text-[11px] leading-snug text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors text-left truncate"
             data-testid={`org-chart-v2-subtitle-${p.node.id}`}
             title={p.node.role || 'no role set'}
           >
             {p.node.role || 'no role set'}
           </button>
-
-          {/* Slice 10 Wave 4 — first responsibility preview line. Hidden
-              when the responsibilities array is empty so the card stays
-              compact. Truncated visually; full text in the drawer. */}
-          {firstResp && (
-            <div
-              class="mt-0.5 text-[10px] leading-snug text-[var(--color-text-faint)] truncate"
-              data-testid={`org-chart-v2-resp-${p.node.id}`}
-              title={firstResp}
-            >
-              {firstResp}
-            </div>
-          )}
-
-          {/* skill chips — max 3 visible, no overflow chip on collapsed
-              card per Wave 4 spec. The drawer lists every skill. */}
-          {visibleSkills.length > 0 && (
-            <div
-              class="mt-1 flex flex-wrap gap-0.5"
-              data-testid={`org-chart-v2-skills-${p.node.id}`}
-            >
-              {visibleSkills.map((s) => (
-                <span
-                  key={s}
-                  class="inline-flex items-center px-1 py-px text-[9px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] border border-[var(--color-border)]"
-                  title={s}
-                >
-                  {s}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
 
-        {/* LOB pill on top-right (replaces the verbose "lob: agency"
-            wording from Wave 2). Same colour as the rest of the chip
-            row but slightly accented to signal LOB membership. */}
-        {p.node.lob && (
-          <span
-            class="shrink-0 inline-flex items-center px-1.5 py-px text-[9px] rounded uppercase tracking-wider bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
-            data-testid={`org-chart-v2-lob-${p.node.id}`}
-            title={`LOB: ${p.node.lob}`}
-          >
-            {p.node.lob}
-          </span>
-        )}
-
-        <div class="relative shrink-0 -mr-1 -mt-1" ref={menuRef}>
+        <div class="relative shrink-0" ref={menuRef}>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}
-            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-full text-[var(--color-text-faint)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
+            class="min-h-[28px] min-w-[28px] inline-flex items-center justify-center rounded-full text-[var(--color-text-faint)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
             aria-label="Card actions"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
@@ -1128,6 +1151,51 @@ function NodeCard(p: CardProps) {
           )}
         </div>
       </div>
+
+      {/* ── body: first-resp preview + skills + LOB on their own rows
+          so they don't compete with the name for horizontal space ── */}
+      {(firstResp || visibleSkills.length > 0 || p.node.lob) && (
+        <div class="px-2 pb-1.5 space-y-0.5">
+          {firstResp && (
+            <div
+              class="text-[10px] leading-snug text-[var(--color-text-faint)] line-clamp-1"
+              data-testid={`org-chart-v2-resp-${p.node.id}`}
+              title={firstResp}
+            >
+              {firstResp}
+            </div>
+          )}
+          {(visibleSkills.length > 0 || p.node.lob) && (
+            <div class="flex flex-wrap items-center gap-0.5">
+              {visibleSkills.length > 0 && (
+                <div
+                  class="inline-flex flex-wrap gap-0.5"
+                  data-testid={`org-chart-v2-skills-${p.node.id}`}
+                >
+                  {visibleSkills.map((s) => (
+                    <span
+                      key={s}
+                      class="inline-flex items-center px-1 py-px text-[9px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] border border-[var(--color-border)]"
+                      title={s}
+                    >
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {p.node.lob && (
+                <span
+                  class="ml-auto inline-flex items-center px-1.5 py-px text-[9px] rounded uppercase tracking-wider bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+                  data-testid={`org-chart-v2-lob-${p.node.id}`}
+                  title={`LOB: ${p.node.lob}`}
+                >
+                  {p.node.lob}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── footer: counts + cadence — interactive buttons are 44×44
           to satisfy the Wave 1 touch-target contract; the visible

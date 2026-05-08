@@ -43,9 +43,36 @@ Playwright spec. No backend, package.json, or v1 OrgChart.tsx changes.
   - Drawer: parent reports-to button, child rows in reports list, skill
     chips, LOB/project chips, OWNS scheduled/triggered/n8n buttons, and
     the editable section header.
-- Spec coverage: `mobile interactive elements meet 44px target (finding 3)`
-  walks 13 representative selectors at 375px viewport and asserts width
-  ≥ 43 and height ≥ 43 (1px slop for sub-pixel rounding).
+
+### Finding 3 — Reviewer follow-up (2026-05-08) → RESOLVED
+The first pass had `min-h-[44px]` on most elements but was missing
+explicit `min-w-[44px]` on the elements the reviewer re-flagged. Second
+pass added `min-w-[44px]` (plus `inline-flex items-center` and `px-3`
+where padding alone wouldn't satisfy 44 × 44 visually) to the entire
+list:
+- Toolbar selects (LOB filter, project filter), exit-focus button.
+- Card title, subtitle, `N reports`, `N AI Employees`, `N scheduled`,
+  `N triggered`, and every overflow `⋯` menu item.
+- Drawer parent reports-to button, every report-list child row, skill
+  chips, LOB/project chips, editable section header (DrawerSection
+  with `onHeader`), OWNS scheduled-task buttons, OWNS triggered-task
+  buttons, OWNS n8n workflow links.
+
+Edge case handled: drawer chips (skill / LOB / project / OWNS items)
+keep their visual chip look — `min-w-[44px]` only enforces the click
+bounding box; `inline-flex items-center justify-center` centers the
+small label inside the 44px box without visual bloat.
+
+- Spec coverage:
+  - Existing `mobile interactive elements meet 44px target (finding 3)`
+    still walks 13 representative selectors at 375px.
+  - NEW `every interactive element on the page meets 44px target
+    (finding 3 · bulk)` opens the drawer and walks every
+    `[data-testid^="org-chart-v2-"]` button/link/select plus toolbar
+    and drawer interactives at 375px, asserting width ≥ 43 and
+    height ≥ 43 for each visible one. Asserts `checked > 10` so a
+    broken selector can't silently pass. This scales with the surface:
+    new buttons added later are automatically validated.
 
 ## Finding 4 — OWNS structure: nest n8n_workflows → RESOLVED
 - Removed the standalone `<DrawerSection title="n8n workflows">` block

@@ -212,6 +212,66 @@ test.describe('Slice 10 Wave 1 — Org Chart v2', () => {
     }
   });
 
+  test('every interactive element on the page meets 44px target (finding 3 · bulk)', async ({ page }) => {
+    // Bulk assertion: walk EVERY interactive element on the OrgChartV2
+    // surface at 375px and confirm its bounding box is ≥ 44 × 44. Scaling
+    // with the surface like this means new buttons added to the page
+    // automatically get checked. Scope is deliberately limited to the
+    // OrgChartV2 page container so we don't pull in the global side nav
+    // (which is owned by App.tsx, out of scope for slice-10 wave-1).
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect(page.getByTestId('org-chart-v2-toolbar')).toBeVisible();
+
+    // Open the drawer so the drawer-resident interactives are also covered
+    // by the bulk sweep (LOB chip, project chips, OWNS rows, child rows,
+    // skill chips, parent jump button, n8n links, etc.).
+    await page.getByTestId('org-chart-v2-subtitle-joe').click();
+    await expect(page.getByTestId('org-chart-v2-drawer-content')).toBeVisible();
+
+    // Combined selector: every page-level org-chart-v2 testid + every
+    // <button>/<a>/<select> inside the drawer. This covers both the
+    // toolbar, cards, and drawer surfaces without straying into the
+    // global app shell.
+    const selector = [
+      '[data-testid^="org-chart-v2-"] button:not([disabled])',
+      '[data-testid^="org-chart-v2-"] a[href]',
+      '[data-testid^="org-chart-v2-"] select:not([disabled])',
+      '[data-testid^="org-chart-v2-"][data-testid$="-joe"]',
+      '[data-testid="org-chart-v2-toolbar"] button:not([disabled])',
+      '[data-testid="org-chart-v2-toolbar"] select:not([disabled])',
+      '[data-testid="org-chart-v2-drawer-content"] button:not([disabled])',
+      '[data-testid="org-chart-v2-drawer-content"] a[href]',
+      '[data-testid="org-chart-v2-drawer-content"] select:not([disabled])',
+    ].join(', ');
+
+    const handles = await page.locator(selector).elementHandles();
+    let checked = 0;
+    let skipped = 0;
+    for (let i = 0; i < handles.length; i++) {
+      const h = handles[i];
+      const box = await h.boundingBox();
+      if (!box) {
+        skipped++;
+        continue; // off-screen, hidden, or zero-size (e.g. closed menu)
+      }
+      // Skip elements that aren't actually visible (e.g. inside collapsed
+      // submenus); boundingBox returns coords for them but width/height 0.
+      if (box.width === 0 || box.height === 0) {
+        skipped++;
+        continue;
+      }
+      const tid = await h.getAttribute('data-testid');
+      const label = tid ?? `el #${i}`;
+      expect.soft(box.width, `${label} width`).toBeGreaterThanOrEqual(43);
+      expect.soft(box.height, `${label} height`).toBeGreaterThanOrEqual(43);
+      checked++;
+    }
+
+    // Sanity: the bulk sweep must have actually checked something. Without
+    // this guard a broken selector would silently pass.
+    expect(checked, `interactive elements checked (${skipped} skipped)`).toBeGreaterThan(10);
+  });
+
   test('OWNS section nests n8n_workflows alongside scheduled + triggered (finding 4)', async ({ page }) => {
     await page.getByTestId('org-chart-v2-subtitle-joe').click();
     const drawer = page.getByTestId('org-chart-v2-drawer-content');

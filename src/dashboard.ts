@@ -2130,7 +2130,7 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     const id = crypto.randomBytes(4).toString('hex');
     // Slice 9 Wave 0: dashboard "New Task" form is a manual create. No
     // source_id since there's no upstream spec — the human IS the source.
-    createMissionTask(id, title, prompt, assignedAgent, 'dashboard', priority, 'manual', null);
+    createMissionTask(id, title, prompt, assignedAgent, 'dashboard', priority, false, false, 'manual', null);
 
     const task = getMissionTask(id);
     return c.json({ task }, 201);

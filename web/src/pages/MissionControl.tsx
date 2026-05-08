@@ -802,6 +802,7 @@ function TaskCard({ task, onChange }: { task: MissionTask; onChange: () => void 
 
   return (
     <div
+      data-task-id={task.id}
       draggable={draggable}
       onDragStart={(e) => { if (draggable) e.dataTransfer?.setData('text/plain', task.id); }}
       onClick={() => setExpanded((v) => !v)}
@@ -1229,21 +1230,42 @@ function ActivityFeed({ agents }: { agents: Agent[] }) {
     return out;
   }, [rows]);
 
-  // Source label click → spec page. Workflow rows scroll to the top of
-  // mission control (where the workflows banner would render once Slice 6
-  // lands; for now this is a no-op visual cue).
+  // Find a kanban task card by id and scroll-pulse it. Used as the
+  // in-page "drawer" fallback for mission_cli / dashboard rows where no
+  // dedicated drawer exists. Bails silently if the card isn't mounted
+  // (task was filtered out, terminal, or just not in the current view).
+  function scrollToKanbanTask(taskId: string) {
+    if (typeof document === 'undefined') return;
+    const el = document.querySelector(`[data-task-id="${CSS.escape(taskId)}"]`) as HTMLElement | null;
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('kanban-pulse');
+    window.setTimeout(() => el.classList.remove('kanban-pulse'), 1600);
+  }
+
+  // Source label click → spec page (with source_id pre-selection params)
+  // for triggered / scheduled. mission_cli + dashboard rows scroll the
+  // kanban to the originating task and briefly highlight it (the kanban
+  // is the in-page "drawer" for those sources). Workflow rows scroll to
+  // the top of mission control (where the workflows banner would render
+  // once Slice 6 lands; for now this is a no-op visual cue).
   //
   // Triggered.tsx (Wave 1B) and Scheduled.tsx (Wave 1C, in main) do not
   // yet read the slug/id query params — this is future-wiring. The
   // params are harmless if ignored and correctly attribute the click
   // intent for when those pages add pre-selection.
-  function navigateToSource(source: string | null, sourceId: string | null) {
+  function navigateToSource(source: string | null, sourceId: string | null, taskId: string | null) {
     if (source === 'webhook' || source === 'log-tail' || source === 'sqlite-poll') {
       const qs = sourceId ? `?slug=${encodeURIComponent(sourceId)}` : '';
       navigate(`/triggered${qs}`);
     } else if (source === 'scheduled') {
       const qs = sourceId ? `?id=${encodeURIComponent(sourceId)}` : '';
       navigate(`/scheduled${qs}`);
+    } else if (source === 'mission_cli' || source === 'dashboard') {
+      // Kanban-scroll fallback: no separate task drawer exists yet, so
+      // scroll the matching kanban card into view and pulse it. Cards
+      // expose `data-task-id` for this lookup.
+      if (taskId) scrollToKanbanTask(taskId);
     } else if (source === 'workflow') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -1401,7 +1423,7 @@ function ActivityFeed({ agents }: { agents: Agent[] }) {
                       key={r.id}
                       row={r}
                       indent
-                      onSourceClick={() => navigateToSource(r.source, r.source_id)}
+                      onSourceClick={() => navigateToSource(r.source, r.source_id, r.id)}
                     />
                   ))}
                 </div>
@@ -1411,7 +1433,7 @@ function ActivityFeed({ agents }: { agents: Agent[] }) {
               <ActivityRowItem
                 key={it.row.id + ':' + idx}
                 row={it.row}
-                onSourceClick={() => navigateToSource(it.row.source, it.row.source_id)}
+                onSourceClick={() => navigateToSource(it.row.source, it.row.source_id, it.row.id)}
               />
             );
           })}

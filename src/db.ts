@@ -2609,6 +2609,19 @@ export function claimNextMissionTask(agentId: string): MissionTask | null {
   return txn();
 }
 
+/**
+ * Slice 9 scheduler bridge: flip a mission_task row directly to 'running'
+ * without going through `claimNextMissionTask`. The scheduler creates
+ * provenance rows for each cron fire and runs them inline (not via the
+ * mission-worker poll loop), so they need to skip the 'queued' state to
+ * avoid the same agent's next 60s tick re-claiming the same row.
+ */
+export function markMissionTaskRunning(id: string): void {
+  db.prepare(
+    `UPDATE mission_tasks SET status = 'running', started_at = ? WHERE id = ?`,
+  ).run(Math.floor(Date.now() / 1000), id);
+}
+
 export function completeMissionTask(
   id: string,
   result: string | null,

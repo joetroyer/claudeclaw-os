@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { CronExpressionParser } from 'cron-parser';
 
 import { AGENT_ID, ALLOWED_CHAT_ID, agentMcpAllowlist } from './config.js';
@@ -12,7 +13,10 @@ import {
   completeMissionTask,
   resetStuckMissionTasks,
   getMissionTask,
+  createMissionTask,
+  markMissionTaskRunning,
 } from './db.js';
+import type { ScheduledTask } from './db.js';
 import { logger } from './logger.js';
 import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
@@ -84,64 +88,112 @@ async function runDueTasks(): Promise<void> {
     // in-flight user message to finish before running. This prevents
     // two Claude processes from hitting the same session simultaneously.
     const chatId = ALLOWED_CHAT_ID || 'scheduler';
-    messageQueue.enqueue(chatId, async () => {
-      const abortController = new AbortController();
-      const timeout = setTimeout(() => abortController.abort(), TASK_TIMEOUT_MS);
-
-      try {
-        if (!task.silent_start) {
-          await sender(`Scheduled task running: "${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '...' : ''}"`);
-        }
-
-        // Run as a fresh agent call (no session — scheduled tasks are autonomous)
-        const result = await runAgent(task.prompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist);
-        clearTimeout(timeout);
-
-        if (result.aborted) {
-          updateTaskAfterRun(task.id, nextRun, 'Timed out after 10 minutes', 'timeout');
-          await sender(`⏱ Task timed out after 10m: "${task.prompt.slice(0, 60)}..." — killed.`);
-          logger.warn({ taskId: task.id }, 'Task timed out');
-          return;
-        }
-
-        const text = result.text?.trim() || 'Task completed with no output.';
-        if (!task.silent_result) {
-          for (const chunk of splitMessage(formatForTelegram(text))) {
-            await sender(chunk);
-          }
-
-          // Inject task output into the active chat session so user replies have context.
-          // Skipped when silent_result is set — if the user never saw the message on Telegram,
-          // pre-loading it into chat context would surprise them on their next message.
-          if (ALLOWED_CHAT_ID) {
-            const activeSession = getSession(ALLOWED_CHAT_ID, schedulerAgentId);
-            logConversationTurn(ALLOWED_CHAT_ID, 'user', `[Scheduled task]: ${task.prompt}`, activeSession ?? undefined, schedulerAgentId);
-            logConversationTurn(ALLOWED_CHAT_ID, 'assistant', text, activeSession ?? undefined, schedulerAgentId);
-          }
-        }
-
-        updateTaskAfterRun(task.id, nextRun, text, 'success');
-
-        logger.info({ taskId: task.id, nextRun }, 'Task complete, next run scheduled');
-      } catch (err) {
-        clearTimeout(timeout);
-        const errMsg = err instanceof Error ? err.message : String(err);
-        updateTaskAfterRun(task.id, nextRun, errMsg.slice(0, 500), 'failed');
-
-        logger.error({ err, taskId: task.id }, 'Scheduled task failed');
-        try {
-          await sender(`❌ Task failed: "${task.prompt.slice(0, 60)}..." — ${errMsg.slice(0, 200)}`);
-        } catch {
-          // ignore send failure
-        }
-      } finally {
-        runningTaskIds.delete(task.id);
-      }
-    });
+    messageQueue.enqueue(chatId, () => executeScheduledTask(task, nextRun));
   }
 
   // Also check for queued mission tasks (one-shot async tasks from Mission Control)
   await runDueMissionTasks();
+}
+
+/**
+ * Slice 9 scheduler bridge: wraps the inline cron run with a mission_tasks
+ * row carrying `source='scheduled'` + `source_id=<scheduled_task.id>` so
+ * the Activity feed (`/api/activity?source=scheduled`) actually returns
+ * rows for cron fires. Without this, scheduled fires were invisible to
+ * the feed because the scheduler runs `runAgent` inline and never queues
+ * a mission_task.
+ *
+ * Exported (with the `_` prefix) so the integration test can drive a
+ * single fire end-to-end without booting the 60s setInterval loop.
+ */
+export async function executeScheduledTask(
+  task: ScheduledTask,
+  nextRun: number,
+  runner: typeof runAgent = runAgent,
+  send: Sender = sender,
+): Promise<void> {
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), TASK_TIMEOUT_MS);
+
+  // Provenance row: created queued, immediately flipped to running so the
+  // same agent's next 60s mission-poll tick can't re-claim it. We use
+  // markMissionTaskRunning directly (not claimNextMissionTask) because
+  // this row is executed inline here, not by the mission worker.
+  const missionId = `sch_${randomBytes(4).toString('hex')}`;
+  const missionTitle = (task.prompt.slice(0, 60) || `scheduled:${task.id}`);
+  try {
+    createMissionTask(
+      missionId,
+      missionTitle,
+      task.prompt,
+      task.agent_id,
+      'scheduler',
+      5,
+      Boolean(task.silent_start),
+      Boolean(task.silent_result),
+      'scheduled',
+      task.id,
+    );
+    markMissionTaskRunning(missionId);
+  } catch (provErr) {
+    // Provenance write failure must not break the scheduled task itself.
+    // Log and proceed — the activity feed loses one row, the user's task
+    // still runs.
+    logger.warn({ err: provErr, taskId: task.id, missionId }, 'scheduler: failed to write mission_tasks provenance row');
+  }
+
+  try {
+    if (!task.silent_start) {
+      await send(`Scheduled task running: "${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '...' : ''}"`);
+    }
+
+    // Run as a fresh agent call (no session — scheduled tasks are autonomous)
+    const result = await runner(task.prompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist);
+    clearTimeout(timeout);
+
+    if (result.aborted) {
+      updateTaskAfterRun(task.id, nextRun, 'Timed out after 10 minutes', 'timeout');
+      try { completeMissionTask(missionId, null, 'failed', 'Timed out after 10 minutes'); } catch (e) { logger.warn({ err: e, missionId }, 'scheduler: failed to mark mission_tasks failed (timeout)'); }
+      await send(`⏱ Task timed out after 10m: "${task.prompt.slice(0, 60)}..." — killed.`);
+      logger.warn({ taskId: task.id, missionId }, 'Task timed out');
+      return;
+    }
+
+    const text = result.text?.trim() || 'Task completed with no output.';
+    if (!task.silent_result) {
+      for (const chunk of splitMessage(formatForTelegram(text))) {
+        await send(chunk);
+      }
+
+      // Inject task output into the active chat session so user replies have context.
+      // Skipped when silent_result is set — if the user never saw the message on Telegram,
+      // pre-loading it into chat context would surprise them on their next message.
+      if (ALLOWED_CHAT_ID) {
+        const activeSession = getSession(ALLOWED_CHAT_ID, schedulerAgentId);
+        logConversationTurn(ALLOWED_CHAT_ID, 'user', `[Scheduled task]: ${task.prompt}`, activeSession ?? undefined, schedulerAgentId);
+        logConversationTurn(ALLOWED_CHAT_ID, 'assistant', text, activeSession ?? undefined, schedulerAgentId);
+      }
+    }
+
+    updateTaskAfterRun(task.id, nextRun, text, 'success');
+    try { completeMissionTask(missionId, text, 'completed'); } catch (e) { logger.warn({ err: e, missionId }, 'scheduler: failed to mark mission_tasks completed'); }
+
+    logger.info({ taskId: task.id, missionId, nextRun }, 'Task complete, next run scheduled');
+  } catch (err) {
+    clearTimeout(timeout);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    updateTaskAfterRun(task.id, nextRun, errMsg.slice(0, 500), 'failed');
+    try { completeMissionTask(missionId, null, 'failed', errMsg.slice(0, 500)); } catch (e) { logger.warn({ err: e, missionId }, 'scheduler: failed to mark mission_tasks failed'); }
+
+    logger.error({ err, taskId: task.id, missionId }, 'Scheduled task failed');
+    try {
+      await send(`❌ Task failed: "${task.prompt.slice(0, 60)}..." — ${errMsg.slice(0, 200)}`);
+    } catch {
+      // ignore send failure
+    }
+  } finally {
+    runningTaskIds.delete(task.id);
+  }
 }
 
 async function runDueMissionTasks(): Promise<void> {

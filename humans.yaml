@@ -21,6 +21,10 @@ humans:
     owns_projects: []
     type: "human"
     reports_to: ""
+    email: "joetroyer@gmail.com"
+    timezone: "America/New_York"
+    avatar: "/avatars/joe.jpg"
+    slack_id: "UDYE1PPR6"
 
   - id: ali
     name: Ali

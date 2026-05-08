@@ -239,7 +239,11 @@ telegram_bot_token_env: META_BOT_TOKEN
         body: JSON.stringify({ yaml: VALID_AGENT_YAML }),
       },
     );
-    expect([400, 404]).toContain(res.status);
+    // The `^[a-z0-9_-]+$` regex rejects on the validation step BEFORE
+    // any filesystem lookup, so the only legal status is 400. A 404 here
+    // would mean the validation gate was bypassed and we fell through to
+    // a file-not-found path — that's a hole, not a tolerable outcome.
+    expect(res.status).toBe(400);
     const escapeProbe = path.join(TEST_ROOT, '..', 'etc', 'passwd');
     expect(fs.existsSync(escapeProbe)).toBe(false);
   });
@@ -360,7 +364,10 @@ reports_to: ""
         body: JSON.stringify({ yaml: 'name: Joe\nrole: Founder\n' }),
       },
     );
-    expect([400, 404]).toContain(res.status);
+    // Same contract as the agents endpoint: validation rejects at the
+    // regex gate with 400 before any file lookup. 404 would imply the
+    // gate was bypassed.
+    expect(res.status).toBe(400);
   });
 
   // The reviewer flagged "the PUT rewrites the entire humans.yaml file"

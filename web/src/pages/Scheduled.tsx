@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import { Pause, Play, Trash2, Clock, LayoutGrid, List, CheckSquare, Plus, BellOff, MessageSquareOff } from 'lucide-preact';
+import { Pause, Play, Trash2, Clock, LayoutGrid, List, CheckSquare, Plus, BellOff, MessageSquareOff, Info, ArrowRight } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
-import { Pill } from '@/components/Pill';
+import { Pill, StatusDot } from '@/components/Pill';
 import { PageState } from '@/components/PageState';
 import { PrivacyToggle } from '@/components/PrivacyToggle';
 import { ConfirmModal } from '@/components/ConfirmModal';
@@ -13,7 +13,7 @@ import { apiPost, apiDelete } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
 import { privacyBlur } from '@/lib/privacy';
 import { pushToast } from '@/lib/toasts';
-import { describeCron } from '@/lib/cron';
+import { describeCron, classifyTaskHealth, type HealthStat } from '@/lib/cron';
 
 interface ScheduledTask {
   id: string;
@@ -177,7 +177,7 @@ export function Scheduled() {
       )}
 
       {tasks.length > 0 && view === 'cards' && (
-        <div class="flex-1 overflow-y-auto p-6">
+        <div class="flex-1 overflow-y-auto p-6" data-testid="view-cards">
           <div class="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))' }}>
             {tasks.map((t) => (
               <TaskCard
@@ -196,7 +196,7 @@ export function Scheduled() {
       )}
 
       {tasks.length > 0 && view === 'list' && (
-        <div class="flex-1 overflow-y-auto">
+        <div class="flex-1 overflow-y-auto" data-testid="view-list">
           <table class="w-full text-[12.5px]">
             <thead class="sticky top-0 bg-[var(--color-bg)] border-b border-[var(--color-border)] z-10">
               <tr class="text-left">
@@ -288,6 +288,8 @@ function ViewSwitcher({ view, onChange }: { view: ViewMode; onChange: (v: ViewMo
           view === 'cards' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]',
         ].join(' ')}
         title="Card view"
+        data-testid="view-toggle-cards"
+        aria-pressed={view === 'cards'}
       >
         <LayoutGrid size={13} />
       </button>
@@ -299,6 +301,8 @@ function ViewSwitcher({ view, onChange }: { view: ViewMode; onChange: (v: ViewMo
           view === 'list' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]',
         ].join(' ')}
         title="List view"
+        data-testid="view-toggle-list"
+        aria-pressed={view === 'list'}
       >
         <List size={13} />
       </button>
@@ -367,11 +371,9 @@ function TaskCard({ task, blurOn, selected, onToggleSelect, onAction, onDeleteRe
               </span>
             ) : null}
             {task.agent_id !== 'main' && <span class="font-mono">@{task.agent_id}</span>}
-            {task.last_status && (
-              <Pill tone={task.last_status === 'success' ? 'done' : task.last_status === 'timeout' ? 'medium' : 'failed'}>
-                last: {task.last_status}
-              </Pill>
-            )}
+          </div>
+          <div class="mt-1.5" data-testid="health-summary">
+            <HealthSummary task={task} />
           </div>
         </div>
         <RowActions task={task} onAction={onAction} onDeleteRequest={onDeleteRequest} />
@@ -395,6 +397,9 @@ function TaskCard({ task, blurOn, selected, onToggleSelect, onAction, onDeleteRe
           )}
         </div>
       )}
+      <div onClick={(e) => e.stopPropagation()}>
+        <RecentRunsPanel task={task} />
+      </div>
     </div>
   );
 }
@@ -431,23 +436,21 @@ function TaskListRow({ task, blurOn, selected, onToggleSelect, onAction, onDelet
       <td class="px-3 py-2.5 text-[var(--color-text-faint)] tabular-nums whitespace-nowrap">
         {task.status === 'active' ? formatCountdown(task.next_run) : '—'}
       </td>
-      <td class="px-3 py-2.5 whitespace-nowrap">
-        <Pill tone={statusTone}>{task.status}</Pill>
-        {task.last_status && (
-          <Pill tone={task.last_status === 'success' ? 'done' : task.last_status === 'timeout' ? 'medium' : 'failed'}>
-            {task.last_status}
-          </Pill>
-        )}
-        {task.silent_start ? (
-          <span class="ml-1 inline-flex items-center text-[var(--color-text-faint)]" title="Silent start: no pre-announce">
-            <BellOff size={11} />
-          </span>
-        ) : null}
-        {task.silent_result ? (
-          <span class="ml-1 inline-flex items-center text-[var(--color-text-faint)]" title="Silent result: no result message on Telegram">
-            <MessageSquareOff size={11} />
-          </span>
-        ) : null}
+      <td class="px-3 py-2.5 whitespace-nowrap" data-testid="list-status-cell">
+        <div class="flex items-center gap-1.5">
+          <Pill tone={statusTone}>{task.status}</Pill>
+          <span data-testid="health-summary"><HealthSummary task={task} /></span>
+          {task.silent_start ? (
+            <span class="inline-flex items-center text-[var(--color-text-faint)]" title="Silent start: no pre-announce">
+              <BellOff size={11} />
+            </span>
+          ) : null}
+          {task.silent_result ? (
+            <span class="inline-flex items-center text-[var(--color-text-faint)]" title="Silent result: no result message on Telegram">
+              <MessageSquareOff size={11} />
+            </span>
+          ) : null}
+        </div>
       </td>
       <td class="px-3 py-2.5 font-mono text-[11px] text-[var(--color-text-muted)] whitespace-nowrap">
         @{task.agent_id}
@@ -456,6 +459,93 @@ function TaskListRow({ task, blurOn, selected, onToggleSelect, onAction, onDelet
         <RowActions task={task} onAction={onAction} onDeleteRequest={onDeleteRequest} />
       </td>
     </tr>
+  );
+}
+
+// ── Health row ────────────────────────────────────────────────────
+//
+// Single-line summary that combines schedule preview, last-run
+// freshness, and the status dot. The dot tone comes from
+// classifyTaskHealth (see web/src/lib/cron.ts) which returns one of
+// done | medium | failed | neutral. We translate that into the
+// Pill/StatusDot palette so the row matches the rest of the app.
+function healthDotTone(h: HealthStat): 'done' | 'medium' | 'failed' | 'neutral' {
+  return h.tone;
+}
+
+function HealthSummary({ task }: { task: ScheduledTask }) {
+  const health = useMemo(
+    () => classifyTaskHealth({
+      cron: task.schedule,
+      lastRun: task.last_run,
+      lastStatus: task.last_status,
+      status: task.status,
+    }),
+    [task.schedule, task.last_run, task.last_status, task.status],
+  );
+  const lastRunLabel = task.last_run
+    ? `last run ${formatRelativeTime(task.last_run)}`
+    : 'no runs yet';
+  return (
+    <span class="inline-flex items-center gap-1.5 text-[10.5px] text-[var(--color-text-faint)]" title={`${health.label} · interval ~${health.intervalSec ? Math.round(health.intervalSec / 60) + 'm' : 'n/a'}`}>
+      <StatusDot tone={healthDotTone(health)} />
+      <span class="tabular-nums">{lastRunLabel}</span>
+      <span>·</span>
+      <span class={
+        health.tone === 'failed' ? 'text-[var(--color-status-failed)]'
+        : health.tone === 'medium' ? 'text-[var(--color-priority-medium)]'
+        : health.tone === 'done' ? 'text-[var(--color-status-done)]'
+        : 'text-[var(--color-text-faint)]'
+      }>{health.label}</span>
+    </span>
+  );
+}
+
+// ── Recent runs panel ─────────────────────────────────────────────
+//
+// Honest disclosure: src/scheduler.ts runs scheduled tasks INLINE via
+// runAgent() and only persists `last_run`/`last_result`/`last_status`
+// on the scheduled_tasks row. There is no scheduled_runs history
+// table today, and /api/activity?source=scheduled returns 0 rows
+// because the scheduler doesn't insert mission_tasks on each fire.
+//
+// This panel surfaces the architectural gap clearly instead of
+// fabricating a history. The "See all in Activity" link is
+// future-proofed with the URL params Wave 1A's Activity feed will
+// recognise once the scheduler is wired.
+function RecentRunsPanel({ task }: { task: ScheduledTask }) {
+  const activityHref = `/mission?activity_source=scheduled&activity_source_id=${encodeURIComponent(task.id)}`;
+  return (
+    <div class="mt-2 pt-2 border-t border-[var(--color-border)]" data-testid="recent-runs-panel">
+      <div class="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1.5">Recent runs</div>
+      {task.last_run ? (
+        <div class="text-[11px] text-[var(--color-text-muted)] tabular-nums" data-testid="recent-runs-last">
+          Last run: {formatRelativeTime(task.last_run)}
+          {task.last_status ? ` · ${task.last_status}` : ''}
+        </div>
+      ) : (
+        <div class="text-[11px] text-[var(--color-text-faint)]" data-testid="recent-runs-last">
+          No runs captured yet.
+        </div>
+      )}
+      <div class="mt-2 flex items-start gap-1.5 text-[10.5px] text-[var(--color-text-faint)] leading-relaxed" data-testid="deferred-history-note">
+        <Info size={11} class="shrink-0 mt-0.5" />
+        <span>
+          Older runs aren't yet captured. Scheduled fires will populate the unified Activity
+          feed once <code class="font-mono text-[10px]">src/scheduler.ts</code> writes a
+          mission_tasks row per fire (deferred slice).
+        </span>
+      </div>
+      <a
+        href={activityHref}
+        onClick={(e) => e.stopPropagation()}
+        class="mt-1.5 inline-flex items-center gap-1 text-[10.5px] text-[var(--color-accent)] hover:underline"
+        data-testid="see-all-in-activity"
+      >
+        See all in Activity
+        <ArrowRight size={11} />
+      </a>
+    </div>
   );
 }
 

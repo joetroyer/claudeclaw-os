@@ -1,0 +1,21 @@
+
+> claudeclaw@1.1.0 test
+> vitest run src/slice-8.contract.test.ts
+
+
+ RUN  v2.1.9 /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a56058da032126abb
+
+[21:48:52.293] [32mINFO[39m (76680): [36mwatcher: loaded watcher-referenced env vars from .env[39m
+    [35mkeys[39m: [
+      "TRADING_MONITOR_SECRET",
+      "N8N_ERROR_SECRET",
+      "SLACK_WEBHOOK_URL"
+    ]
+    [35mloaded[39m: 0
+ ✓ src/slice-8.contract.test.ts (16 tests) 61ms
+
+ Test Files  1 passed (1)
+      Tests  16 passed (16)
+   Start at  21:48:51
+   Duration  939ms (transform 253ms, setup 8ms, collect 643ms, tests 61ms, environment 0ms, prepare 36ms)
+

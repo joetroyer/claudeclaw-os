@@ -1,0 +1,31 @@
+=== Slice 8 Data Integrity — PRE ===
+
+## Auth middleware (cf-access bypass) location:
+
+## Auth middleware section (lines 424-457) hash:
+07a1bcef37ea019c7bd13f1fafd13417db22eea59a9682bb6574da6ebd957984  -
+
+## watchers.yaml SHA-256:
+c939ca00347d30d38e37164158697e8e875919ea4c7b7675a167235c0ff5a836  watchers.yaml
+
+## watchers.yaml line count:
+     218 watchers.yaml
+
+## watchers.yaml — webhook/log-tail/sqlite-poll counts:
+   4     type: log-tail
+   3     type: sqlite-poll
+   2     type: webhook
+
+## DB row counts:
+(no live db at store/claudeclaw.db — clean worktree)
+
+## Existing watchers' names (for diff baseline):
+  - name: wa-daemon-health
+  - name: tunnel-health
+  - name: bot-fatal
+  - name: warroom-voice-health
+  - name: stuck-mission-tasks
+  - name: meet-session-stale-cleanup
+  - name: incoming-whatsapp-vip
+  - name: trading-monitor-trigger
+  - name: n8n-error-router

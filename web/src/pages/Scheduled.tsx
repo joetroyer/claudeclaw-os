@@ -1,11 +1,13 @@
-import { useState } from 'preact/hooks';
-import { Pause, Play, Trash2, Clock, LayoutGrid, List, CheckSquare, Pencil } from 'lucide-preact';
+import { useEffect, useMemo, useState } from 'preact/hooks';
+import { Pause, Play, Trash2, Clock, LayoutGrid, List, CheckSquare, Plus } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { Pill } from '@/components/Pill';
 import { PageState } from '@/components/PageState';
 import { PrivacyToggle } from '@/components/PrivacyToggle';
 import { ConfirmModal } from '@/components/ConfirmModal';
 import { EditTaskModal } from '@/components/EditTaskModal';
+import { Modal } from '@/components/Modal';
+import { ScheduleBuilder } from '@/components/ScheduleBuilder';
 import { useFetch } from '@/lib/useFetch';
 import { apiPost, apiDelete } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
@@ -56,6 +58,7 @@ export function Scheduled() {
   const [confirmOpen, setConfirmOpen] = useState<null | 'single' | 'bulk'>(null);
   const [pendingSingle, setPendingSingle] = useState<ScheduledTask | null>(null);
   const [editing, setEditing] = useState<ScheduledTask | null>(null);
+  const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const blurOn = privacyBlur('scheduled').value;
 
@@ -149,6 +152,14 @@ export function Scheduled() {
             )}
             <PrivacyToggle section="scheduled" />
             <ViewSwitcher view={view} onChange={setViewPersisted} />
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-medium bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] transition-colors"
+              data-testid="new-scheduled-task-button"
+            >
+              <Plus size={14} /> New Scheduled Task
+            </button>
           </>
         }
       />
@@ -228,6 +239,12 @@ export function Scheduled() {
         task={editing}
         onClose={() => setEditing(null)}
         onSaved={refresh}
+      />
+
+      <CreateScheduledTaskModal
+        open={creating}
+        onClose={() => setCreating(false)}
+        onCreated={refresh}
       />
 
       <ConfirmModal
@@ -454,5 +471,206 @@ function RowActions({ task, onAction, onDeleteRequest }: {
         <Trash2 size={12} />
       </button>
     </div>
+  );
+}
+
+// ── Create modal ───────────────────────────────────────────────────────
+//
+// Mirrors the visual layout of EditTaskModal but creates a new task via
+// POST /api/tasks. Validates cron client-side using the same describeCron
+// helper that the scheduler's cron-parser library powers, so a clearly
+// invalid cron disables the Save button before the server round-trip.
+//
+// Server still validates (cron-parser) — this is a UX shortcut only.
+
+interface AgentLite { id: string; name: string }
+
+const CRON_PRESETS: Array<{ label: string; cron: string }> = [
+  { label: 'Daily 9am', cron: '0 9 * * *' },
+  { label: 'Weekdays 8am', cron: '0 8 * * 1-5' },
+  { label: 'Every Monday 9am', cron: '0 9 * * 1' },
+  { label: 'Every Sunday 6pm', cron: '0 18 * * 0' },
+  { label: 'Every 4 hours', cron: '0 */4 * * *' },
+];
+
+function CreateScheduledTaskModal({
+  open, onClose, onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [prompt, setPrompt] = useState('');
+  const [cron, setCron] = useState('0 9 * * *');
+  const [agentId, setAgentId] = useState('main');
+  const [skill, setSkill] = useState('');
+  const [title, setTitle] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const agents = useFetch<{ agents: AgentLite[] }>(open ? '/api/agents' : null);
+  const cronPreview = useMemo(() => describeCron(cron), [cron]);
+
+  // Reset on close.
+  useEffect(() => {
+    if (!open) {
+      setPrompt(''); setCron('0 9 * * *'); setAgentId('main');
+      setSkill(''); setTitle(''); setErr(null);
+    }
+  }, [open]);
+
+  async function save() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const body: Record<string, unknown> = {
+        agent_id: agentId,
+        prompt: prompt.trim(),
+        cron: cron.trim(),
+      };
+      if (skill.trim()) body.skill = skill.trim();
+      if (title.trim()) body.title = title.trim();
+      await apiPost('/api/tasks', body);
+      pushToast({ tone: 'success', title: 'Task scheduled' });
+      onCreated();
+      onClose();
+    } catch (e: any) {
+      const msg = e?.body?.error || e?.message || String(e);
+      setErr(msg);
+      pushToast({ tone: 'error', title: 'Create failed', description: msg, durationMs: 7000 });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const canSave = !busy && cronPreview.ok && prompt.trim().length > 0 && agentId.trim().length > 0;
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="New scheduled task"
+      width={620}
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={onClose}
+            class="px-3 py-1.5 rounded text-[12.5px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={!canSave}
+            data-testid="create-scheduled-task-save"
+            class="ml-auto px-3 py-1.5 rounded text-[12.5px] font-medium bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {busy ? 'Saving…' : 'Create'}
+          </button>
+        </>
+      }
+    >
+      <div class="flex flex-col gap-4">
+        <div>
+          <label class="block text-[10.5px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1.5">
+            Title <span class="text-[var(--color-text-faint)]">(optional)</span>
+          </label>
+          <input
+            type="text"
+            value={title}
+            onInput={(e) => setTitle((e.target as HTMLInputElement).value)}
+            placeholder="Defaults to first 60 chars of prompt"
+            maxLength={200}
+            data-testid="create-scheduled-task-title"
+            class="w-full px-3 py-2 rounded bg-[var(--color-bg)] border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none text-[12.5px] text-[var(--color-text)]"
+          />
+        </div>
+
+        <div>
+          <label class="block text-[10.5px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1.5">
+            Prompt
+          </label>
+          <textarea
+            value={prompt}
+            onInput={(e) => setPrompt((e.target as HTMLTextAreaElement).value)}
+            rows={6}
+            autoFocus
+            placeholder="Full instructions for the agent. Max 10000 chars."
+            maxLength={10000}
+            data-testid="create-scheduled-task-prompt"
+            class="w-full px-3 py-2 rounded bg-[var(--color-bg)] border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none text-[12.5px] text-[var(--color-text)] font-mono leading-relaxed resize-y"
+          />
+        </div>
+
+        <div>
+          <label class="block text-[10.5px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1.5">
+            Schedule
+          </label>
+          <ScheduleBuilder
+            cron={cron}
+            onChange={setCron}
+            externalError={cronPreview.ok ? null : cronPreview.text}
+          />
+          <div class="mt-3 flex flex-wrap gap-1.5">
+            {CRON_PRESETS.map((p) => (
+              <button
+                key={p.cron}
+                type="button"
+                onClick={() => setCron(p.cron)}
+                class={[
+                  'text-[10.5px] px-2 py-1 rounded transition-colors',
+                  cron === p.cron
+                    ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)] border border-[var(--color-accent)]'
+                    : 'bg-[var(--color-elevated)] text-[var(--color-text-muted)] border border-[var(--color-border)] hover:text-[var(--color-text)]',
+                ].join(' ')}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[10.5px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1.5">
+              Agent
+            </label>
+            <select
+              value={agentId}
+              onInput={(e) => setAgentId((e.target as HTMLSelectElement).value)}
+              data-testid="create-scheduled-task-agent"
+              class="w-full px-3 py-2 rounded bg-[var(--color-bg)] border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none text-[12.5px] text-[var(--color-text)]"
+            >
+              <option value="main">@main</option>
+              {agents.data?.agents
+                ?.filter((a) => a.id !== 'main')
+                .map((a) => (
+                  <option key={a.id} value={a.id}>@{a.id} {a.name && a.name !== a.id ? `· ${a.name}` : ''}</option>
+                ))}
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10.5px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1.5">
+              Skill <span class="text-[var(--color-text-faint)]">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={skill}
+              onInput={(e) => setSkill((e.target as HTMLInputElement).value)}
+              placeholder="e.g. gmail"
+              class="w-full px-3 py-2 rounded bg-[var(--color-bg)] border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none text-[12.5px] text-[var(--color-text)] font-mono"
+            />
+          </div>
+        </div>
+
+        {err && (
+          <div class="text-[11.5px] text-[var(--color-status-failed)] bg-[var(--color-status-failed-soft,_rgba(255,0,0,0.08))] border border-[var(--color-status-failed)] rounded px-2 py-1.5">
+            {err}
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }

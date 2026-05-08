@@ -171,6 +171,11 @@ export function SkillPicker({ open, onClose, onPick, initialQuery = '' }: SkillP
         role="listbox"
         aria-label="Skills"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // Container-level Escape so focus on a row button still closes
+          // the picker (search input has its own Escape, but rows didn't).
+          if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+        }}
       >
         <div class="flex items-center gap-2 px-3 py-2 border-b border-[var(--color-border)] shrink-0">
           <Search size={14} class="text-[var(--color-text-faint)]" />

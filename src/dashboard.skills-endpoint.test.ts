@@ -10,14 +10,14 @@
 //
 // Tests use Hono's app.request() so no real port is opened.
 
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
 import { _initTestDatabase } from './db.js';
 import { buildDashboardApp } from './dashboard.js';
-import { initSkillRegistry, getAllSkills } from './skill-registry.js';
+import { initSkillRegistry, getAllSkills, _stopSkillRegistryForTest } from './skill-registry.js';
 import type { Hono } from 'hono';
 
 const TOKEN = 'test-contract-token';
@@ -31,6 +31,14 @@ beforeAll(() => {
 
 beforeEach(() => {
   _initTestDatabase();
+});
+
+// Tear down any fs.watch handles + pending debounce timers the registry
+// installs during initSkillRegistry. Without this, watcher handles
+// outlive the temp dirs the tests rm-rf in their finally blocks, racing
+// the 500ms debounce.
+afterEach(() => {
+  _stopSkillRegistryForTest();
 });
 
 function writeSkill(baseDir: string, slug: string, content: string): void {

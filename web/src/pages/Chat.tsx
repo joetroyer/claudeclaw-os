@@ -309,7 +309,7 @@ export function Chat() {
               aria-expanded={pickerOpen}
               title="Show slash commands"
               class={[
-                'inline-flex items-center gap-1 px-2.5 py-2 rounded-lg text-[11.5px] font-medium border transition-colors shrink-0',
+                'inline-flex items-center justify-center gap-1 px-2.5 min-h-[44px] min-w-[44px] rounded-lg text-[11.5px] font-medium border transition-colors shrink-0',
                 pickerOpen
                   ? 'bg-[var(--color-accent-soft)] text-[var(--color-text)] border-[var(--color-accent)]/40'
                   : 'bg-[var(--color-elevated)] text-[var(--color-text-muted)] border-[var(--color-border)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]',

@@ -391,9 +391,9 @@ export function OrgChartV2() {
         inner.dataset.autoScale = '1';
         return;
       }
-      // Don't shrink below 0.75 so cards stay legible. Below that we
+      // Don't shrink below 0.55 so cards stay legible. Below that we
       // allow horizontal scroll on the canvas for the remainder.
-      const ratio = Math.max(0.75, visible / naturalWidth);
+      const ratio = Math.max(0.55, visible / naturalWidth);
       inner.style.transform = `scale(${ratio.toFixed(3)})`;
       inner.dataset.autoScale = ratio.toFixed(3);
       // Compensate for the layout box not shrinking with transform.

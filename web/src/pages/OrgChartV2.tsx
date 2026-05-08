@@ -570,24 +570,29 @@ export function OrgChartV2() {
           }}
           data-testid="org-chart-v2-canvas"
         >
-          <div class="space-y-3">
-            {rootsToRender().map((r) => (
-              <NodeBranch
-                key={r.id}
-                node={r}
-                expanded={expanded}
-                matchSet={matchSet}
-                filterMatchSet={filterMatchSet}
-                onToggle={toggleNode}
-                onTitle={enterFocus}
-                onSubtitle={(id) => setDrawerId(id)}
-                onAvatar={(id) => navigate(`/agents/${encodeURIComponent(id)}`)}
-                onTypeBadge={(t) => setTypeFilter(t)}
-                onScheduled={(id) => navigate(`/scheduled?agent=${encodeURIComponent(id)}`)}
-                onTriggered={(id) => navigate(`/triggered?agent=${encodeURIComponent(id)}`)}
-                onMenu={{ copyLink, expandAllUnder, collapseSiblings, focus: enterFocus }}
-              />
-            ))}
+          {/* Center the tree in a max-width column so cards don't sprawl
+              across ultra-wide displays. The tree itself is left-aligned
+              within this column. */}
+          <div class="mx-auto max-w-[1200px]">
+            <div class="space-y-3">
+              {rootsToRender().map((r) => (
+                <NodeBranch
+                  key={r.id}
+                  node={r}
+                  expanded={expanded}
+                  matchSet={matchSet}
+                  filterMatchSet={filterMatchSet}
+                  onToggle={toggleNode}
+                  onTitle={enterFocus}
+                  onSubtitle={(id) => setDrawerId(id)}
+                  onAvatar={(id) => navigate(`/agents/${encodeURIComponent(id)}`)}
+                  onTypeBadge={(t) => setTypeFilter(t)}
+                  onScheduled={(id) => navigate(`/scheduled?agent=${encodeURIComponent(id)}`)}
+                  onTriggered={(id) => navigate(`/triggered?agent=${encodeURIComponent(id)}`)}
+                  onMenu={{ copyLink, expandAllUnder, collapseSiblings, focus: enterFocus }}
+                />
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -652,12 +657,18 @@ function Toolbar(p: ToolbarProps) {
       class="flex flex-wrap items-center gap-2 px-4 sm:px-6 py-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]"
       data-testid="org-chart-v2-toolbar"
     >
-      <div class="flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded bg-[var(--color-elevated)] text-[12px]">
-        <Search size={12} class="text-[var(--color-text-faint)]" />
+      {/* Search — MissionControl-style: leading magnifying glass, slim
+          input, focus ring uses the app accent. */}
+      <div class="relative flex-1 min-w-[160px] max-w-[260px]">
+        <Search
+          size={12}
+          class="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-text-faint)] pointer-events-none"
+          data-testid="org-chart-v2-search-icon"
+        />
         <input
           type="text"
-          placeholder="Search…"
-          class="bg-transparent outline-none text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] w-[140px] sm:w-[200px]"
+          placeholder="Search org chart…"
+          class="w-full min-h-[44px] bg-[var(--color-card)] border border-[var(--color-border)] rounded pl-7 pr-7 py-1.5 text-[12px] text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] outline-none focus:border-[var(--color-accent)] transition-colors"
           value={p.searchRaw}
           onInput={(e) => p.onSearch((e.target as HTMLInputElement).value)}
           data-testid="org-chart-v2-search"
@@ -665,7 +676,7 @@ function Toolbar(p: ToolbarProps) {
         {p.searchRaw && (
           <button
             type="button"
-            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-[var(--color-text-faint)] hover:text-[var(--color-text)]"
+            class="absolute right-1 top-1/2 -translate-y-1/2 min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-[var(--color-text-faint)] hover:text-[var(--color-text)]"
             onClick={() => p.onSearch('')}
             aria-label="Clear search"
           >
@@ -674,8 +685,9 @@ function Toolbar(p: ToolbarProps) {
         )}
       </div>
 
+      {/* Type-filter pills — inline, slim, no leading icon (the labels
+          already imply the filter). */}
       <div class="flex items-center gap-1 text-[11px]">
-        <Filter size={11} class="text-[var(--color-text-faint)]" />
         <FilterChip
           label="All"
           active={p.typeFilter === 'all'}
@@ -698,7 +710,7 @@ function Toolbar(p: ToolbarProps) {
 
       {p.lobOptions.length > 0 && (
         <select
-          class="text-[11px] px-3 py-2 min-h-[44px] min-w-[44px] rounded bg-[var(--color-elevated)] border border-[var(--color-border)] text-[var(--color-text)]"
+          class="text-[11px] min-h-[44px] px-2 py-1.5 rounded bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-text-muted)] outline-none focus:border-[var(--color-accent)]"
           value={p.lobFilter ?? ''}
           onChange={(e) => {
             const v = (e.target as HTMLSelectElement).value;
@@ -713,7 +725,7 @@ function Toolbar(p: ToolbarProps) {
 
       {p.projectOptions.length > 0 && (
         <select
-          class="text-[11px] px-3 py-2 min-h-[44px] min-w-[44px] rounded bg-[var(--color-elevated)] border border-[var(--color-border)] text-[var(--color-text)]"
+          class="text-[11px] min-h-[44px] px-2 py-1.5 rounded bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-text-muted)] outline-none focus:border-[var(--color-accent)]"
           value={p.projectFilter ?? ''}
           onChange={(e) => {
             const v = (e.target as HTMLSelectElement).value;
@@ -730,7 +742,7 @@ function Toolbar(p: ToolbarProps) {
         <button
           type="button"
           onClick={p.onExitFocus}
-          class="ml-auto inline-flex items-center gap-1 px-3 py-2 min-h-[44px] min-w-[44px] rounded text-[11px] bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:opacity-90"
+          class="ml-auto inline-flex items-center gap-1 px-2 py-1.5 min-h-[44px] rounded text-[11px] bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:opacity-90"
           data-testid="org-chart-v2-exit-focus"
         >
           <X size={11} />
@@ -756,8 +768,8 @@ function FilterChip({
       data-testid={testid}
       class={[
         // Min 44x44 touch target per WCAG 2.5.5 (Level AAA) /
-        // Apple HIG. Visual padding is generous.
-        'min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-3 py-2 rounded transition-colors',
+        // Apple HIG. Visual padding is tight; the size is hit-area only.
+        'min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-2.5 py-1.5 rounded text-[11px] transition-colors',
         active
           ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
           : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)]',
@@ -770,14 +782,14 @@ function FilterChip({
 
 function DepthPresets({ onPick }: { onPick: (d: number | 'all') => void }) {
   return (
-    <div class="inline-flex items-center bg-[var(--color-elevated)] border border-[var(--color-border)] rounded p-0.5 text-[11px]">
-      <span class="px-1.5 text-[var(--color-text-faint)]">Depth</span>
+    <div class="inline-flex items-center gap-0.5 bg-[var(--color-card)] border border-[var(--color-border)] rounded p-0.5 text-[11px]">
+      <span class="px-1.5 text-[var(--color-text-faint)] text-[10px] uppercase tracking-wider">Depth</span>
       {[1, 2, 3].map((d) => (
         <button
           key={d}
           type="button"
           onClick={() => onPick(d)}
-          class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-3 py-2 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-card)] transition-colors"
+          class="min-h-[44px] min-w-[36px] inline-flex items-center justify-center px-2 py-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
           data-testid={`org-chart-v2-depth-${d}`}
         >
           {d}
@@ -786,7 +798,7 @@ function DepthPresets({ onPick }: { onPick: (d: number | 'all') => void }) {
       <button
         type="button"
         onClick={() => onPick('all')}
-        class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-3 py-2 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-card)] transition-colors"
+        class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-2 py-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
         data-testid="org-chart-v2-depth-all"
       >
         All
@@ -828,13 +840,7 @@ function NodeBranch(p: BranchProps) {
   const highlighted = !!p.matchSet?.has(p.node.id);
 
   return (
-    <div
-      class="org-chart-branch"
-      style={{
-        // Indent visually using padding-left at each branch.
-        paddingLeft: p.node.depth === 0 ? '0' : '0',
-      }}
-    >
+    <div class="org-chart-branch">
       <NodeCard
         node={p.node}
         isOpen={isOpen}
@@ -852,11 +858,13 @@ function NodeBranch(p: BranchProps) {
       />
       {isOpen && hasChildren && (
         <div
-          class="ml-4 sm:ml-6 mt-2 pl-3 sm:pl-4 border-l border-[var(--color-border)] space-y-2 org-chart-children"
+          class="org-chart-children mt-2 ml-5 sm:ml-7 space-y-3"
           data-testid={`org-chart-v2-children-${p.node.id}`}
         >
           {p.node.children.map((c) => (
-            <NodeBranch key={c.id} {...p} node={c} />
+            <div key={c.id} class="org-chart-child-rail">
+              <NodeBranch {...p} node={c} />
+            </div>
           ))}
         </div>
       )}
@@ -906,28 +914,34 @@ function NodeCard(p: CardProps) {
   const triggered = p.node.triggered_count || p.node.owns.triggered_tasks.length || 0;
 
   const isHuman = p.node.type === 'human';
+  const primarySkills = p.node.skills?.primary ?? [];
+  const visibleSkills = primarySkills.slice(0, 3);
+  const overflowSkills = primarySkills.length - visibleSkills.length;
 
   return (
     <div
       class={[
-        'org-chart-card relative rounded-md border bg-[var(--color-card)] p-3 transition-all',
+        'org-chart-card relative rounded-md border bg-[var(--color-card)] transition-all',
+        // Fixed compact width per Wave 2 spec — never stretches to fill
+        // the surrounding column. Mobile (<400px) gets a fluid w-full so
+        // the card still hits the viewport edges cleanly.
+        'w-full sm:w-[380px] sm:max-w-[380px]',
         p.dimmed ? 'opacity-40' : 'opacity-100',
         p.highlighted ? 'ring-2 ring-[var(--color-accent)]' : '',
-        isHuman
-          ? 'border-[var(--color-border)]'
-          : 'border-[var(--color-border)]',
+        'border-[var(--color-border)] hover:border-[var(--color-border-strong)]',
       ].join(' ')}
       data-testid={`org-chart-v2-card-${p.node.id}`}
       data-org-node-id={p.node.id}
       data-node-type={p.node.type}
       data-node-lob={p.node.lob ?? ''}
     >
-      <div class="flex items-start gap-3">
-        {p.hasChildren && (
+      {/* ── header row: chevron · avatar · (name + role + chips + lob) · type badge · menu ── */}
+      <div class="flex items-start gap-2 px-3 pt-3 pb-2">
+        {p.hasChildren ? (
           <button
             type="button"
             onClick={p.onToggle}
-            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center -ml-2 text-[var(--color-text-faint)] hover:text-[var(--color-text)] transition-colors shrink-0"
+            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center -ml-1 text-[var(--color-text-faint)] hover:text-[var(--color-text)] transition-colors shrink-0"
             aria-expanded={p.isOpen}
             aria-label={p.isOpen ? 'Collapse' : 'Expand'}
             data-testid={`org-chart-v2-toggle-${p.node.id}`}
@@ -936,112 +950,105 @@ function NodeCard(p: CardProps) {
               ? <ChevronDown size={14} />
               : <ChevronRight size={14} />}
           </button>
+        ) : (
+          <div class="w-3 shrink-0" />
         )}
-        {!p.hasChildren && <div class="w-[14px] shrink-0" />}
 
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); p.onAvatar(); }}
-          class="shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center"
+          class="shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center hover:opacity-90 transition-opacity"
           aria-label={`Open ${p.node.name} profile`}
         >
-          <AgentAvatar agentId={p.node.id} name={p.node.name} size={36} running={p.node.running ?? undefined} />
+          <AgentAvatar agentId={p.node.id} name={p.node.name} size={40} running={p.node.running ?? undefined} />
         </button>
 
         <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2 flex-wrap">
+          <div class="flex items-start gap-2">
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); p.onTitle(); }}
-              class="min-h-[44px] min-w-[44px] inline-flex items-center px-2 text-[14px] font-semibold text-[var(--color-text)] hover:text-[var(--color-accent)] transition-colors text-left"
+              class="flex-1 min-w-0 min-h-[44px] inline-flex items-center text-[14px] font-semibold text-[var(--color-text)] hover:text-[var(--color-accent)] transition-colors text-left truncate"
               data-testid={`org-chart-v2-title-${p.node.id}`}
+              title={p.node.name}
             >
-              {p.node.name}
+              <span class="truncate">{p.node.name}</span>
             </button>
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); p.onTypeBadge(); }}
               data-testid={`org-chart-v2-badge-${p.node.id}`}
               aria-label={`Filter to ${p.node.type}`}
-              class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-2"
+              title={`Filter to ${isHuman ? 'humans' : 'AI'}`}
+              class="shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-2 rounded hover:bg-[var(--color-elevated)] transition-colors group"
             >
               <Pill tone={isHuman ? 'neutral' : 'accent'}>
                 <span class="inline-flex items-center gap-1">
                   {isHuman ? <User size={9} /> : <Bot size={9} />}
                   {isHuman ? 'Human' : 'AI'}
+                  <Filter
+                    size={8}
+                    class="opacity-0 group-hover:opacity-60 transition-opacity"
+                  />
                 </span>
               </Pill>
             </button>
-            {p.node.lob && (
-              <span class="text-[10px] text-[var(--color-text-faint)] px-1.5 py-0.5 rounded bg-[var(--color-elevated)]">
-                {p.node.lob}
-              </span>
-            )}
           </div>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); p.onSubtitle(); }}
-            class="flex items-center w-full min-h-[44px] min-w-[44px] text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors text-left mt-0.5 line-clamp-2 py-2"
+            class="block w-full min-h-[44px] text-[12px] leading-snug text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors text-left line-clamp-2 py-1"
             data-testid={`org-chart-v2-subtitle-${p.node.id}`}
           >
             {p.node.role || 'no role set'}
           </button>
 
-          <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-faint)]">
-            {reportCount > 0 && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!p.isOpen) p.onToggle();
-                }}
-                class="min-h-[44px] min-w-[44px] inline-flex items-center gap-1 px-3 py-2 hover:text-[var(--color-text)] transition-colors"
-                data-testid={`org-chart-v2-reports-${p.node.id}`}
-              >
-                <ChevronDown size={10} />
-                {reportCount} report{reportCount === 1 ? '' : 's'}
-              </button>
-            )}
-            {aiReportCount > 0 && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!p.isOpen) p.onToggle();
-                }}
-                class="min-h-[44px] min-w-[44px] inline-flex items-center gap-1 px-3 py-2 hover:text-[var(--color-text)] transition-colors"
-                data-testid={`org-chart-v2-ai-reports-${p.node.id}`}
-              >
-                <ChevronDown size={10} />
-                {aiReportCount} AI Employee{aiReportCount === 1 ? '' : 's'}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); p.onScheduled(); }}
-              class="min-h-[44px] min-w-[44px] inline-flex items-center gap-1 px-3 py-2 hover:text-[var(--color-text)] transition-colors"
-              data-testid={`org-chart-v2-scheduled-${p.node.id}`}
+          {/* skill chips — max 3 visible, "+N" affordance */}
+          {visibleSkills.length > 0 && (
+            <div
+              class="mt-1.5 flex flex-wrap gap-1"
+              data-testid={`org-chart-v2-skills-${p.node.id}`}
             >
-              <Calendar size={10} />
-              {scheduled} scheduled
-            </button>
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); p.onTriggered(); }}
-              class="min-h-[44px] min-w-[44px] inline-flex items-center gap-1 px-3 py-2 hover:text-[var(--color-text)] transition-colors"
-              data-testid={`org-chart-v2-triggered-${p.node.id}`}
+              {visibleSkills.map((s) => (
+                <span
+                  key={s}
+                  class="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] border border-[var(--color-border)]"
+                  title={s}
+                >
+                  {s}
+                </span>
+              ))}
+              {overflowSkills > 0 && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); p.onSubtitle(); }}
+                  class="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded bg-[var(--color-elevated)] text-[var(--color-text-faint)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
+                  aria-label={`${overflowSkills} more skill${overflowSkills === 1 ? '' : 's'}`}
+                  data-testid={`org-chart-v2-skills-more-${p.node.id}`}
+                >
+                  +{overflowSkills}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* lob tag — small, low-emphasis under the chips */}
+          {p.node.lob && (
+            <div
+              class="mt-1 flex items-center gap-1 text-[10px]"
+              data-testid={`org-chart-v2-lob-${p.node.id}`}
             >
-              <Zap size={10} />
-              {triggered} triggered
-            </button>
-          </div>
+              <span class="uppercase tracking-wider text-[var(--color-text-faint)]">lob</span>
+              <span class="text-[var(--color-text-muted)]">{p.node.lob}</span>
+            </div>
+          )}
         </div>
 
-        <div class="relative shrink-0" ref={menuRef}>
+        <div class="relative shrink-0 -mr-1" ref={menuRef}>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}
-            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 rounded text-[var(--color-text-faint)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
+            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-full bg-[var(--color-elevated)] text-[var(--color-text-faint)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
             aria-label="Card actions"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
@@ -1078,11 +1085,75 @@ function NodeCard(p: CardProps) {
                 label="Edit YAML…"
                 onClick={() => {
                   setMenuOpen(false);
-                  pushToast({ tone: 'info', title: 'Edit YAML coming in Slice 10 Wave 2' });
+                  pushToast({ tone: 'info', title: 'Edit YAML coming in Slice 10 Wave 3' });
                 }}
               />
             </div>
           )}
+        </div>
+      </div>
+
+      {/* ── footer: nav-counts on row 1, cadence + menu hint on row 2 ── */}
+      <div class="border-t border-[var(--color-border)] px-3 py-1.5 text-[11px] text-[var(--color-text-faint)] space-y-0.5">
+        {(reportCount > 0 || aiReportCount > 0) && (
+          <div class="flex flex-wrap items-center gap-x-3">
+            {reportCount > 0 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!p.isOpen) p.onToggle();
+                }}
+                class="cursor-pointer min-h-[28px] inline-flex items-center gap-1 hover:text-[var(--color-accent)] transition-colors group"
+                data-testid={`org-chart-v2-reports-${p.node.id}`}
+                aria-label={`Show ${reportCount} report${reportCount === 1 ? '' : 's'}`}
+              >
+                {p.isOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                <span>{reportCount} report{reportCount === 1 ? '' : 's'}</span>
+              </button>
+            )}
+            {aiReportCount > 0 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!p.isOpen) p.onToggle();
+                }}
+                class="cursor-pointer min-h-[28px] inline-flex items-center gap-1 hover:text-[var(--color-accent)] transition-colors"
+                data-testid={`org-chart-v2-ai-reports-${p.node.id}`}
+                aria-label={`Show ${aiReportCount} AI employee${aiReportCount === 1 ? '' : 's'}`}
+              >
+                <Bot size={10} />
+                <span>{aiReportCount} AI Emp</span>
+              </button>
+            )}
+          </div>
+        )}
+        <div class="flex flex-wrap items-center gap-x-3">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); p.onScheduled(); }}
+            class="cursor-pointer min-h-[28px] inline-flex items-center gap-1 hover:text-[var(--color-accent)] transition-colors group"
+            data-testid={`org-chart-v2-scheduled-${p.node.id}`}
+            aria-label={`Open ${scheduled} scheduled task${scheduled === 1 ? '' : 's'}`}
+            title="View scheduled tasks"
+          >
+            <Calendar size={10} />
+            <span>{scheduled} sched</span>
+            <span class="opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true">→</span>
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); p.onTriggered(); }}
+            class="cursor-pointer min-h-[28px] inline-flex items-center gap-1 hover:text-[var(--color-accent)] transition-colors group"
+            data-testid={`org-chart-v2-triggered-${p.node.id}`}
+            aria-label={`Open ${triggered} triggered task${triggered === 1 ? '' : 's'}`}
+            title="View triggered tasks"
+          >
+            <Zap size={10} />
+            <span>{triggered} trig</span>
+            <span class="opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true">→</span>
+          </button>
         </div>
       </div>
     </div>

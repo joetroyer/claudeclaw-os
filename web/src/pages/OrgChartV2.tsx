@@ -698,7 +698,7 @@ function Toolbar(p: ToolbarProps) {
 
       {p.lobOptions.length > 0 && (
         <select
-          class="text-[11px] px-3 py-2 min-h-[44px] rounded bg-[var(--color-elevated)] border border-[var(--color-border)] text-[var(--color-text)]"
+          class="text-[11px] px-3 py-2 min-h-[44px] min-w-[44px] rounded bg-[var(--color-elevated)] border border-[var(--color-border)] text-[var(--color-text)]"
           value={p.lobFilter ?? ''}
           onChange={(e) => {
             const v = (e.target as HTMLSelectElement).value;
@@ -713,7 +713,7 @@ function Toolbar(p: ToolbarProps) {
 
       {p.projectOptions.length > 0 && (
         <select
-          class="text-[11px] px-3 py-2 min-h-[44px] rounded bg-[var(--color-elevated)] border border-[var(--color-border)] text-[var(--color-text)]"
+          class="text-[11px] px-3 py-2 min-h-[44px] min-w-[44px] rounded bg-[var(--color-elevated)] border border-[var(--color-border)] text-[var(--color-text)]"
           value={p.projectFilter ?? ''}
           onChange={(e) => {
             const v = (e.target as HTMLSelectElement).value;
@@ -730,7 +730,7 @@ function Toolbar(p: ToolbarProps) {
         <button
           type="button"
           onClick={p.onExitFocus}
-          class="ml-auto inline-flex items-center gap-1 px-3 py-2 min-h-[44px] rounded text-[11px] bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:opacity-90"
+          class="ml-auto inline-flex items-center gap-1 px-3 py-2 min-h-[44px] min-w-[44px] rounded text-[11px] bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:opacity-90"
           data-testid="org-chart-v2-exit-focus"
         >
           <X size={11} />
@@ -953,7 +953,7 @@ function NodeCard(p: CardProps) {
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); p.onTitle(); }}
-              class="min-h-[44px] inline-flex items-center text-[14px] font-semibold text-[var(--color-text)] hover:text-[var(--color-accent)] transition-colors text-left"
+              class="min-h-[44px] min-w-[44px] inline-flex items-center px-2 text-[14px] font-semibold text-[var(--color-text)] hover:text-[var(--color-accent)] transition-colors text-left"
               data-testid={`org-chart-v2-title-${p.node.id}`}
             >
               {p.node.name}
@@ -981,7 +981,7 @@ function NodeCard(p: CardProps) {
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); p.onSubtitle(); }}
-            class="block w-full min-h-[44px] text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors text-left mt-0.5 line-clamp-2 py-2"
+            class="flex items-center w-full min-h-[44px] min-w-[44px] text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors text-left mt-0.5 line-clamp-2 py-2"
             data-testid={`org-chart-v2-subtitle-${p.node.id}`}
           >
             {p.node.role || 'no role set'}
@@ -995,7 +995,7 @@ function NodeCard(p: CardProps) {
                   e.stopPropagation();
                   if (!p.isOpen) p.onToggle();
                 }}
-                class="min-h-[44px] inline-flex items-center gap-1 px-2 py-2 hover:text-[var(--color-text)] transition-colors"
+                class="min-h-[44px] min-w-[44px] inline-flex items-center gap-1 px-3 py-2 hover:text-[var(--color-text)] transition-colors"
                 data-testid={`org-chart-v2-reports-${p.node.id}`}
               >
                 <ChevronDown size={10} />
@@ -1009,7 +1009,7 @@ function NodeCard(p: CardProps) {
                   e.stopPropagation();
                   if (!p.isOpen) p.onToggle();
                 }}
-                class="min-h-[44px] inline-flex items-center gap-1 px-2 py-2 hover:text-[var(--color-text)] transition-colors"
+                class="min-h-[44px] min-w-[44px] inline-flex items-center gap-1 px-3 py-2 hover:text-[var(--color-text)] transition-colors"
                 data-testid={`org-chart-v2-ai-reports-${p.node.id}`}
               >
                 <ChevronDown size={10} />
@@ -1019,7 +1019,7 @@ function NodeCard(p: CardProps) {
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); p.onScheduled(); }}
-              class="min-h-[44px] inline-flex items-center gap-1 px-2 py-2 hover:text-[var(--color-text)] transition-colors"
+              class="min-h-[44px] min-w-[44px] inline-flex items-center gap-1 px-3 py-2 hover:text-[var(--color-text)] transition-colors"
               data-testid={`org-chart-v2-scheduled-${p.node.id}`}
             >
               <Calendar size={10} />
@@ -1028,7 +1028,7 @@ function NodeCard(p: CardProps) {
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); p.onTriggered(); }}
-              class="min-h-[44px] inline-flex items-center gap-1 px-2 py-2 hover:text-[var(--color-text)] transition-colors"
+              class="min-h-[44px] min-w-[44px] inline-flex items-center gap-1 px-3 py-2 hover:text-[var(--color-text)] transition-colors"
               data-testid={`org-chart-v2-triggered-${p.node.id}`}
             >
               <Zap size={10} />
@@ -1095,7 +1095,7 @@ function MenuItem({ label, onClick }: { label: string; onClick: () => void }) {
       type="button"
       role="menuitem"
       onClick={onClick}
-      class="w-full text-left min-h-[44px] px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-text)]"
+      class="w-full text-left flex items-center min-h-[44px] min-w-[44px] px-3 py-2 hover:bg-[var(--color-elevated)] text-[var(--color-text)]"
     >
       {label}
     </button>
@@ -1141,7 +1141,7 @@ function NodeDrawer(p: DrawerProps) {
               Reports to{' '}
               <button
                 type="button"
-                class="min-h-[44px] inline-flex items-center px-2 py-2 text-[var(--color-accent)] hover:underline"
+                class="min-h-[44px] min-w-[44px] inline-flex items-center px-3 py-2 text-[var(--color-accent)] hover:underline"
                 onClick={() => p.onJumpTo(parent.id)}
               >
                 {parent.name}
@@ -1169,7 +1169,7 @@ function NodeDrawer(p: DrawerProps) {
                 key={s}
                 type="button"
                 onClick={() => p.onSkill(s)}
-                class="min-h-[44px] inline-flex items-center px-3 py-2 text-[11px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
+                class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-3 py-2 text-[11px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
               >
                 {s}
               </button>
@@ -1200,7 +1200,7 @@ function NodeDrawer(p: DrawerProps) {
               <button
                 type="button"
                 onClick={() => p.onLob(n.lob!)}
-                class="min-h-[44px] inline-flex items-center px-3 py-2 text-[11px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
+                class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-3 py-2 text-[11px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
               >
                 {n.lob}
               </button>
@@ -1214,7 +1214,7 @@ function NodeDrawer(p: DrawerProps) {
                   key={pr}
                   type="button"
                   onClick={() => p.onProject(pr)}
-                  class="min-h-[44px] inline-flex items-center px-3 py-2 text-[11px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
+                  class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-3 py-2 text-[11px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
                 >
                   {pr}
                 </button>
@@ -1235,7 +1235,7 @@ function NodeDrawer(p: DrawerProps) {
                 <button
                   type="button"
                   onClick={() => p.onJumpTo(c.id)}
-                  class="w-full text-left flex items-center gap-2 px-3 py-2 min-h-[44px] rounded hover:bg-[var(--color-elevated)] transition-colors"
+                  class="w-full text-left flex items-center gap-2 px-3 py-2 min-h-[44px] min-w-[44px] rounded hover:bg-[var(--color-elevated)] transition-colors"
                   data-testid={`org-chart-v2-drawer-child-${c.id}`}
                 >
                   <AgentAvatar agentId={c.id} name={c.name} size={24} />
@@ -1268,7 +1268,7 @@ function DrawerSection({
         <button
           type="button"
           onClick={onHeader}
-          class="min-h-[44px] inline-flex items-center px-2 py-2 -mx-2 text-[11px] uppercase tracking-wider text-[var(--color-text-faint)] hover:text-[var(--color-text-muted)] mb-2 cursor-pointer"
+          class="min-h-[44px] min-w-[44px] inline-flex items-center px-3 py-2 -mx-3 text-[11px] uppercase tracking-wider text-[var(--color-text-faint)] hover:text-[var(--color-text-muted)] mb-2 cursor-pointer"
         >
           {title}
         </button>
@@ -1382,7 +1382,7 @@ function OwnsBlock({
                 key={t}
                 type="button"
                 onClick={() => onScheduled(t)}
-                class="min-h-[44px] px-3 py-2 text-[11px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
+                class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-3 py-2 text-[11px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
               >
                 {t}
               </button>
@@ -1401,7 +1401,7 @@ function OwnsBlock({
                 key={t}
                 type="button"
                 onClick={() => onTriggered(t)}
-                class="min-h-[44px] px-3 py-2 text-[11px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
+                class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-3 py-2 text-[11px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
               >
                 {t}
               </button>
@@ -1421,7 +1421,7 @@ function OwnsBlock({
                   href={`https://n8n.joetroyer.com/workflow/${encodeURIComponent(wf)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="inline-flex items-center min-h-[44px] px-3 py-2 text-[var(--color-accent)] hover:underline"
+                  class="inline-flex items-center min-h-[44px] min-w-[44px] px-3 py-2 text-[var(--color-accent)] hover:underline"
                 >
                   {wf}
                 </a>

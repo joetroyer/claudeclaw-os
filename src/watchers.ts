@@ -27,6 +27,7 @@ import { PROJECT_ROOT, ALLOWED_CHAT_ID, activeBotToken } from './config.js';
 import { logger } from './logger.js';
 import Database from 'better-sqlite3';
 import { lookupN8nWorkflowOwner } from './db.js';
+import { readEnvFile } from './env.js';
 
 // Resolved at call time so tests can override via CLAUDECLAW_STORE_DB_PATH
 // (Slice 4 contract tests). Production: always falls back to the canonical
@@ -343,6 +344,14 @@ function performN8nLookup(
  * a 4xx/5xx or thrown error is logged but does not abort the action chain.
  * Avoids a hard dependency on Slack — if the env var is missing we log
  * and skip so dev environments don't generate spurious failures.
+ *
+ * Two URL shapes supported:
+ *   - native Slack incoming webhook (hooks.slack.com/services/...): body
+ *     `{ text, channel? }` per Slack's spec.
+ *   - n8n "Jarvis Slack Messenger" workflow (path contains
+ *     /jarvis-slack): body `{ target, message }` per the workflow's
+ *     trigger schema. The workflow handles the actual Slack API call
+ *     using its OAuth credential. Channel falls back to integration-alerts.
  */
 async function sendSlack(template: string, channel: string | undefined, webhookUrlEnv: string): Promise<boolean> {
   const url = process.env[webhookUrlEnv];
@@ -351,8 +360,10 @@ async function sendSlack(template: string, channel: string | undefined, webhookU
     return false;
   }
   try {
-    const body: Record<string, unknown> = { text: template };
-    if (channel) body.channel = channel;
+    const isJarvisN8n = url.includes('/jarvis-slack');
+    const body: Record<string, unknown> = isJarvisN8n
+      ? { target: channel || 'integration-alerts', message: template }
+      : (channel ? { text: template, channel } : { text: template });
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -585,6 +596,61 @@ function startSqlitePoll(cfg: SqlitePollWatcherCfg, cursors: Record<string, numb
 
 let _started = false;
 
+// Load .env keys referenced by watchers (secret_env, webhook_url_env) into
+// process.env. The project's readEnvFile is allowlist-based and does NOT
+// auto-populate process.env (security: keep secrets out of child processes
+// by default). But webhook handlers + send-slack actions reference env vars
+// dynamically by name, so we explicitly load only what watchers.yaml asks
+// for. Idempotent + cached: safe to call from multiple entry points
+// (module-import, startWatchers, request-time).
+let _watcherEnvLoaded = false;
+function ensureWatcherEnvLoaded(): void {
+  if (_watcherEnvLoaded) return;
+  _watcherEnvLoaded = true;
+  try {
+    const cfgPath = path.join(PROJECT_ROOT, 'watchers.yaml');
+    if (!fs.existsSync(cfgPath)) return;
+    const parsed = yaml.load(fs.readFileSync(cfgPath, 'utf-8')) as WatchersFile;
+    const wantedEnv = new Set<string>();
+    // Walk an action list, recursing into if-owned/if-unowned which wrap
+    // nested action lists. Each conditional's value is itself an Action[].
+    const walk = (actions: unknown[]): void => {
+      for (const a of actions ?? []) {
+        if (!a || typeof a !== 'object') continue;
+        const obj = a as Record<string, unknown>;
+        if ('send-slack' in obj) {
+          const ss = obj['send-slack'] as { webhook_url_env?: string };
+          if (ss?.webhook_url_env) wantedEnv.add(ss.webhook_url_env);
+        }
+        if ('if-owned' in obj && Array.isArray(obj['if-owned'])) walk(obj['if-owned'] as unknown[]);
+        if ('if-unowned' in obj && Array.isArray(obj['if-unowned'])) walk(obj['if-unowned'] as unknown[]);
+      }
+    };
+    for (const w of parsed.watchers ?? []) {
+      if (w.type === 'webhook' && w.secret_env) wantedEnv.add(w.secret_env);
+      if (w.type === 'log-tail') for (const t of w.triggers ?? []) walk(t.actions as unknown[]);
+      else if (w.type === 'sqlite-poll' || w.type === 'webhook') walk(w.actions as unknown[]);
+    }
+    if (wantedEnv.size > 0) {
+      const loaded = readEnvFile([...wantedEnv]);
+      for (const [k, v] of Object.entries(loaded)) {
+        if (!process.env[k]) process.env[k] = v;
+      }
+      logger.info(
+        { keys: [...wantedEnv], loaded: Object.keys(loaded).length },
+        'watcher: loaded watcher-referenced env vars from .env',
+      );
+    }
+  } catch (err) {
+    logger.warn({ err }, 'watcher: failed to load watcher env vars; HMAC checks may fail');
+  }
+}
+
+// Run at module import so env vars are available before the dashboard
+// gets its first webhook request, regardless of whether startWatchers()
+// is invoked from the bot's boot path.
+ensureWatcherEnvLoaded();
+
 export function startWatchers(): void {
   if (_started) return;
   _started = true;
@@ -602,6 +668,11 @@ export function startWatchers(): void {
     logger.error({ err }, 'failed to parse watchers.yaml; disabling watchers');
     return;
   }
+
+  // Watcher env loading happens at module-import time via
+  // ensureWatcherEnvLoaded() so it runs even when startWatchers() isn't
+  // explicitly invoked.
+  ensureWatcherEnvLoaded();
 
   const cursors = loadCursors();
   let webhookCount = 0;

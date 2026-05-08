@@ -210,6 +210,7 @@ watchers:
                 Then re-run the workflow in n8n to confirm routing.
           - send-slack:
               webhook_url_env: SLACK_WEBHOOK_URL
+              channel: integration-alerts
               template: |
                 :rotating_light: Unowned n8n workflow errored.
                 Workflow: {payload.workflow_name} (id: {_workflow_id})

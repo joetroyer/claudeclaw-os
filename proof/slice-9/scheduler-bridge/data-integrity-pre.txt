@@ -1,0 +1,8 @@
+--- BEFORE FIRE ---
+mission_tasks count: 0
+rows: []
+[12:35:02.542] [32mINFO[39m (11687): [36mMigration: added agent_id column to memories table[39m
+[12:35:02.542] [32mINFO[39m (11687): [36mMigration: added embedding column to consolidations table[39m
+[12:35:02.543] [32mINFO[39m (11687): [36mMigration: restricted FTS5 update trigger to content columns only[39m
+[12:35:02.543] [32mINFO[39m (11687): [36mMigration: added superseded_by column to memories table[39m
+[12:35:02.543] [32mINFO[39m (11687): [36mMigration: added pinned column to memories table[39m

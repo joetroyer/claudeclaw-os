@@ -1,0 +1,40 @@
+--- BEFORE FIRE ---
+mission_tasks count: 0
+rows: []
+
+--- AFTER FIRE ---
+mission_tasks count: 1
+rows: [
+  {
+    "id": "sch_57ef788d",
+    "title": "morning briefing",
+    "prompt": "morning briefing",
+    "assigned_agent": "main",
+    "status": "completed",
+    "result": "Briefing: 3 emails, 2 meetings.",
+    "error": null,
+    "created_by": "scheduler",
+    "priority": 5,
+    "created_at": 1778258108,
+    "started_at": 1778258108,
+    "completed_at": 1778258108,
+    "silent_start": 0,
+    "silent_result": 0,
+    "source": "scheduled",
+    "source_id": "proof-cron"
+  }
+]
+
+--- DELTA ---
+rows added: 1
+source values present: [ 'scheduled' ]
+source_id values present: [ 'proof-cron' ]
+[12:35:08.138] [32mINFO[39m (11737): [36mMigration: added agent_id column to memories table[39m
+[12:35:08.138] [32mINFO[39m (11737): [36mMigration: added embedding column to consolidations table[39m
+[12:35:08.138] [32mINFO[39m (11737): [36mMigration: restricted FTS5 update trigger to content columns only[39m
+[12:35:08.138] [32mINFO[39m (11737): [36mMigration: added superseded_by column to memories table[39m
+[12:35:08.139] [32mINFO[39m (11737): [36mMigration: added pinned column to memories table[39m
+[12:35:08.141] [32mINFO[39m (11737): [36mTask complete, next run scheduled[39m
+    [35mtaskId[39m: "proof-cron"
+    [35mmissionId[39m: "sch_57ef788d"
+    [35mnextRun[39m: 1778344448

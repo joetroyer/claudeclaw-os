@@ -1,0 +1,357 @@
+{
+  "nodes": [
+    {
+      "id": "joe",
+      "type": "human",
+      "name": "Joe",
+      "role": "Founder & Operator",
+      "reports_to": null,
+      "lob": null,
+      "projects": [],
+      "skills": {
+        "primary": []
+      },
+      "owns": {
+        "scheduled_tasks": [],
+        "triggered_tasks": [],
+        "n8n_workflows": [],
+        "watchers": []
+      },
+      "four_rs": {
+        "role": "",
+        "responsibilities": [],
+        "results": [],
+        "requirements": []
+      },
+      "personality": {
+        "tone": "",
+        "pushback": "",
+        "format": ""
+      },
+      "avatar": null,
+      "running": null,
+      "today_turns": null,
+      "scheduled_count": 0,
+      "triggered_count": 0
+    },
+    {
+      "id": "ali",
+      "type": "human",
+      "name": "Ali",
+      "role": "Operator",
+      "reports_to": "joe",
+      "lob": null,
+      "projects": [],
+      "skills": {
+        "primary": []
+      },
+      "owns": {
+        "scheduled_tasks": [],
+        "triggered_tasks": [],
+        "n8n_workflows": [],
+        "watchers": []
+      },
+      "four_rs": {
+        "role": "",
+        "responsibilities": [],
+        "results": [],
+        "requirements": []
+      },
+      "personality": {
+        "tone": "",
+        "pushback": "",
+        "format": ""
+      },
+      "avatar": null,
+      "running": null,
+      "today_turns": null,
+      "scheduled_count": 0,
+      "triggered_count": 0
+    },
+    {
+      "id": "clawds",
+      "type": "ai",
+      "name": "Clawds",
+      "role": "Google Ads expert. Reads CSV exports, screenshots, and account data; drafts ad copy, keyword strategies, campaign structures.",
+      "reports_to": "meta",
+      "lob": "agency",
+      "projects": [],
+      "skills": {
+        "primary": []
+      },
+      "owns": {
+        "scheduled_tasks": [],
+        "triggered_tasks": [],
+        "n8n_workflows": [],
+        "watchers": []
+      },
+      "four_rs": {
+        "role": "",
+        "responsibilities": [],
+        "results": [],
+        "requirements": []
+      },
+      "personality": {
+        "tone": "",
+        "pushback": "",
+        "format": ""
+      },
+      "avatar": null,
+      "running": true,
+      "today_turns": 0,
+      "scheduled_count": 0,
+      "triggered_count": 0
+    },
+    {
+      "id": "comms",
+      "type": "ai",
+      "name": "Comms",
+      "role": "All human communication — email, Slack, WhatsApp, YouTube comments, community forums, LinkedIn DMs.",
+      "reports_to": "meta",
+      "lob": "agency",
+      "projects": [],
+      "skills": {
+        "primary": []
+      },
+      "owns": {
+        "scheduled_tasks": [],
+        "triggered_tasks": [],
+        "n8n_workflows": [],
+        "watchers": []
+      },
+      "four_rs": {
+        "role": "",
+        "responsibilities": [],
+        "results": [],
+        "requirements": []
+      },
+      "personality": {
+        "tone": "",
+        "pushback": "",
+        "format": ""
+      },
+      "avatar": null,
+      "running": true,
+      "today_turns": 3,
+      "scheduled_count": 0,
+      "triggered_count": 0
+    },
+    {
+      "id": "content",
+      "type": "ai",
+      "name": "Content",
+      "role": "YouTube scripts, LinkedIn posts, carousels, trend research, content calendar.",
+      "reports_to": "meta",
+      "lob": "course",
+      "projects": [],
+      "skills": {
+        "primary": []
+      },
+      "owns": {
+        "scheduled_tasks": [],
+        "triggered_tasks": [],
+        "n8n_workflows": [],
+        "watchers": []
+      },
+      "four_rs": {
+        "role": "",
+        "responsibilities": [],
+        "results": [],
+        "requirements": []
+      },
+      "personality": {
+        "tone": "",
+        "pushback": "",
+        "format": ""
+      },
+      "avatar": null,
+      "running": true,
+      "today_turns": 5,
+      "scheduled_count": 0,
+      "triggered_count": 0
+    },
+    {
+      "id": "goldbot-labs",
+      "type": "ai",
+      "name": "Gold Bot Labs",
+      "role": "XAUUSD backtest & analysis agent — queries the lab DB, compares scenarios, surfaces what is working.",
+      "reports_to": "joe",
+      "lob": "goldbot",
+      "projects": [],
+      "skills": {
+        "primary": []
+      },
+      "owns": {
+        "scheduled_tasks": [],
+        "triggered_tasks": [],
+        "n8n_workflows": [],
+        "watchers": []
+      },
+      "four_rs": {
+        "role": "",
+        "responsibilities": [],
+        "results": [],
+        "requirements": []
+      },
+      "personality": {
+        "tone": "",
+        "pushback": "",
+        "format": ""
+      },
+      "avatar": null,
+      "running": true,
+      "today_turns": 0,
+      "scheduled_count": 0,
+      "triggered_count": 0
+    },
+    {
+      "id": "meta",
+      "type": "ai",
+      "name": "Meta",
+      "role": "Coordinator. Splits work across the team, routes follow-ups, owns multi-agent orchestration.",
+      "reports_to": "joe",
+      "lob": "personal",
+      "projects": [],
+      "skills": {
+        "primary": []
+      },
+      "owns": {
+        "scheduled_tasks": [
+          "daily-rollup",
+          "weekly-summary"
+        ],
+        "triggered_tasks": [],
+        "n8n_workflows": [],
+        "watchers": []
+      },
+      "four_rs": {
+        "role": "",
+        "responsibilities": [],
+        "results": [],
+        "requirements": []
+      },
+      "personality": {
+        "tone": "",
+        "pushback": "",
+        "format": ""
+      },
+      "avatar": null,
+      "running": true,
+      "today_turns": 8,
+      "scheduled_count": 2,
+      "triggered_count": 0
+    },
+    {
+      "id": "ops",
+      "type": "ai",
+      "name": "Ops",
+      "role": "Calendar, scheduling, billing, Stripe, Gumroad, admin, task management.",
+      "reports_to": "meta",
+      "lob": "personal",
+      "projects": [],
+      "skills": {
+        "primary": []
+      },
+      "owns": {
+        "scheduled_tasks": [],
+        "triggered_tasks": [],
+        "n8n_workflows": [],
+        "watchers": []
+      },
+      "four_rs": {
+        "role": "",
+        "responsibilities": [],
+        "results": [],
+        "requirements": []
+      },
+      "personality": {
+        "tone": "",
+        "pushback": "",
+        "format": ""
+      },
+      "avatar": null,
+      "running": true,
+      "today_turns": 1,
+      "scheduled_count": 0,
+      "triggered_count": 0
+    },
+    {
+      "id": "research",
+      "type": "ai",
+      "name": "Research",
+      "role": "Deep web research, academic sources, competitive intel, trend analysis.",
+      "reports_to": "meta",
+      "lob": "personal",
+      "projects": [],
+      "skills": {
+        "primary": []
+      },
+      "owns": {
+        "scheduled_tasks": [],
+        "triggered_tasks": [],
+        "n8n_workflows": [],
+        "watchers": []
+      },
+      "four_rs": {
+        "role": "",
+        "responsibilities": [],
+        "results": [],
+        "requirements": []
+      },
+      "personality": {
+        "tone": "",
+        "pushback": "",
+        "format": ""
+      },
+      "avatar": null,
+      "running": true,
+      "today_turns": 2,
+      "scheduled_count": 0,
+      "triggered_count": 0
+    },
+    {
+      "id": "trading-monitor",
+      "type": "ai",
+      "name": "Trading Monitor",
+      "role": "Live signal handler. Receives trading signal webhooks (Gold Scalping, Ceddi, etc.), parses, classifies, logs.",
+      "reports_to": "joe",
+      "lob": "goldbot",
+      "projects": [],
+      "skills": {
+        "primary": [
+          "lab-query-signal-performance",
+          "lab-query-channel-credibility"
+        ]
+      },
+      "owns": {
+        "scheduled_tasks": [],
+        "triggered_tasks": [
+          "trading-monitor-trigger"
+        ],
+        "n8n_workflows": [],
+        "watchers": [
+          "trading-monitor-trigger"
+        ]
+      },
+      "four_rs": {
+        "role": "",
+        "responsibilities": [],
+        "results": [
+          "Triggered task acknowledged within 60s of webhook receipt",
+          "Signal logged to hive_mind with provider, side, instrument, levels"
+        ],
+        "requirements": []
+      },
+      "personality": {
+        "tone": "",
+        "pushback": "",
+        "format": ""
+      },
+      "avatar": null,
+      "running": true,
+      "today_turns": 12,
+      "scheduled_count": 0,
+      "triggered_count": 1
+    }
+  ]
+}

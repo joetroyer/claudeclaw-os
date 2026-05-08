@@ -1,32 +1,27 @@
 name: Trading Monitor
-description: Live signal handler. Receives trading signal webhooks (Gold Scalping, Ceddi, etc.), parses them, decides action, logs to hive mind. Read-only on the lab; never sends orders.
+description: "Live signal handler. Receives trading signal webhooks (Gold Scalping, Ceddi, etc.), parses, classifies, logs."
 
-telegram_bot_token_env: TRADING_MONITOR_BOT_TOKEN
+# Token env name is scrubbed for the fixture — readOrgChartV2 doesn't read it.
+telegram_bot_token_env: FIXTURE_BOT_TOKEN
 
 model: claude-sonnet-4-6
-
-# ────────────────────────────────────────────────────────────────────
-# Slice 1 schema (additive). Persona lives in CLAUDE.md.
-# ────────────────────────────────────────────────────────────────────
 
 four_rs:
   results:
     - "Triggered task acknowledged within 60s of webhook receipt"
     - "Signal logged to hive_mind with provider, side, instrument, levels"
-    - "Notify Joe via Telegram on any signal flagged high-priority"
 
 owns:
   scheduled_tasks: []
   triggered_tasks:
-    - trading-monitor-trigger
+    - "trading-monitor-trigger"
   n8n_workflows: []
   watchers:
-    - trading-monitor-trigger
+    - "trading-monitor-trigger"
 
-lob: "trading"
+lob: "goldbot"
 
-projects:
-  - "live-signal-routing"
+projects: []
 
 ideal: false
 

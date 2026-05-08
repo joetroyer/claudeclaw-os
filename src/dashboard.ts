@@ -108,6 +108,7 @@ import {
   DEFAULT_OVERLOAD_THRESHOLD,
   type WorkloadCounts,
 } from './org-chart.js';
+import { readOrgChartV2, type AgentRuntimeStats } from './org-chart-v2.js';
 import {
   resolveAgentAvatar,
   avatarEtag,
@@ -3382,6 +3383,35 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     }
     const workload = decorateWorkload(agents, counts, days, threshold);
     return c.json({ window_days: days, overload_threshold: threshold, workload });
+  });
+
+  // ── Org chart V2 (Slice 10 Wave 0, read-only) ───────────────────────
+  // Single endpoint returns BOTH humans + AI agents as a flat array.
+  // Each node carries the new `type` ("ai" | "human") and `reports_to`
+  // fields so the OrgChartV2 page can assemble the tree client-side.
+  // The Slice 3 endpoints above stay as-is — same shape, same data.
+  app.get('/api/org-chart-v2', (c) => {
+    // Build per-agent runtime stats (running flag + today's turn count)
+    // here so org-chart-v2.ts stays a pure consumer of YAML files. Same
+    // pid-file probe used by /api/agents above.
+    const runtime = new Map<string, AgentRuntimeStats>();
+    for (const id of listAgentIds()) {
+      let running = false;
+      try {
+        const pidFile = path.join(STORE_DIR, `agent-${id}.pid`);
+        if (fs.existsSync(pidFile)) {
+          const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+          running = isProcessAlive(pid);
+        }
+      } catch { /* leave running=false */ }
+      let todayTurns = 0;
+      try {
+        todayTurns = getAgentTokenStats(id).todayTurns;
+      } catch { /* leave 0 */ }
+      runtime.set(id, { running, today_turns: todayTurns });
+    }
+    const nodes = readOrgChartV2(runtime);
+    return c.json({ nodes });
   });
 
   // ── Dashboard personalization ────────────────────────────────────────

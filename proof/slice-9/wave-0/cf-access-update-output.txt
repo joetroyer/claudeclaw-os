@@ -1,0 +1,41 @@
+=== CF Access bypass app PRE state ===
+2026-05-08T09:11:52-04:00
+Account: <redacted>
+App ID: c2ef63f0-7f63-4446-a535-fbfd7ee36e7c
+
+=== GET app (before) ===
+domain: clawos.joetroyer.com/api/watchers/webhook/*
+name: Clawos Webhook Ingress (HMAC-only, no Access)
+decision: None
+app_launcher_visible: True
+success: True
+errors: []
+
+=== PATCH (set domain → /api/hooks/*) ===
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import sys,json; d=json.load(sys.stdin); r=d.get('result',{}); print('domain:', r.get('domain')); print('name:', r.get('name')); print('decision:', r.get('decision')); print('updated_at:', r.get('updated_at')); print('success:', d.get('success')); print('errors:', d.get('errors'))
+                                                                                    ^^^^^
+AttributeError: 'NoneType' object has no attribute 'get'
+
+=== GET (verify post-PATCH) ===
+domain: clawos.joetroyer.com/api/watchers/webhook/*
+name: Clawos Webhook Ingress (HMAC-only, no Access)
+decision: None
+updated_at: 2026-05-08T10:04:00Z
+
+=== Captured at 2026-05-08T09:12:03-04:00 ===
+
+=== Note: PATCH (10405 — Method not allowed for this auth scheme) failed.
+    CF Access API requires PUT for self_hosted apps with this token.
+    The brief's PATCH instruction was generalized; PUT is the working verb.
+
+=== PUT (final, successful) ===
+domain: clawos.joetroyer.com/api/hooks/*
+self_hosted_domains: ['clawos.joetroyer.com/api/hooks/*']
+name: Clawos Webhook Ingress (HMAC-only, no Access)
+updated_at: 2026-05-08T13:12:17Z
+policies:
+ - Bypass for webhook ingress decision=bypass [{'everyone': {}}]
+
+=== Final captured at 2026-05-08T09:12:29-04:00 ===

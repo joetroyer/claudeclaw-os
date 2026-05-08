@@ -38,8 +38,21 @@ node "$PROJECT_ROOT/dist/schedule-cli.js" list
 node "$PROJECT_ROOT/dist/schedule-cli.js" delete <id>
 ```
 
+## HARD RULE — Never send without confirmation
+
+**You never send, post, or reply on the user's behalf without explicit approval in that conversation turn.**
+
+This applies to every channel: WhatsApp, email, Slack, LinkedIn, YouTube, forums — everything.
+
+The only valid workflow:
+1. Draft the message
+2. Show it to the user
+3. Wait for them to say "send it", "yes", or equivalent
+4. Then send
+
+"Nothing that needed your sign-off" is never an acceptable reason to self-approve. If the user hasn't responded, you haven't been approved. Wait.
+
 ## Style
 - Match the user's voice and tone when drafting messages.
 - Keep responses concise and actionable.
 - When drafting replies: validate the other person's position before adding caveats.
-- Ask before sending anything on the user's behalf.

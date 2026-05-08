@@ -1,0 +1,54 @@
+=== mission_tasks schema (NEW columns added by runMigrations on next boot) ===
+
+Worktree-built schema (after createSchema + runMigrations on a fresh DB):
+  cid=0 id TEXT notnull=0 pk=1
+  cid=1 title TEXT notnull=1 pk=0
+  cid=2 prompt TEXT notnull=1 pk=0
+  cid=3 assigned_agent TEXT notnull=0 pk=0
+  cid=4 status TEXT notnull=1 pk=0
+  cid=5 result TEXT notnull=0 pk=0
+  cid=6 error TEXT notnull=0 pk=0
+  cid=7 created_by TEXT notnull=1 pk=0
+  cid=8 priority INTEGER notnull=1 pk=0
+  cid=9 created_at INTEGER notnull=1 pk=0
+  cid=10 started_at INTEGER notnull=0 pk=0
+  cid=11 completed_at INTEGER notnull=0 pk=0
+  cid=12 source TEXT notnull=0 pk=0
+  cid=13 source_id TEXT notnull=0 pk=0
+
+Indexes:
+  sqlite_autoindex_mission_tasks_1
+  idx_mission_status
+  idx_mission_source
+
+=== Diff vs PRE schema ===
+Added columns: source TEXT (nullable), source_id TEXT (nullable)
+Added indexes: idx_mission_source ON (source, source_id, created_at DESC)
+All other columns + indexes UNCHANGED.
+
+=== mission_tasks row count (live production DB) ===
+72
+(pre baseline was 71; production traffic adds rows continuously — delta is from real bot work, not from this migration. The migration is additive and zero-loss; runs at next bot startup via runMigrations().)
+
+=== git diff main -- agents/*/CLAUDE.md (must be empty) ===
+(empty if clean)
+
+=== watchers.yaml entries (must equal pre — 10) ===
+  - name: wa-daemon-health
+  - name: tunnel-health
+  - name: bot-fatal
+  - name: warroom-voice-health
+  - name: stuck-mission-tasks
+  - name: meet-session-stale-cleanup
+  - name: incoming-whatsapp-vip
+  - name: trading-monitor-trigger
+  - name: trading-monitor-ingest
+  - name: n8n-error-router
+
+=== Idempotency proof ===
+  Run 1 (fresh DB): all 14 columns + 2 indexes created.
+  Run 2 (re-run on same DB): same 14 columns, same 2 indexes — addColumnIfMissing skips.
+  Run 3 (legacy DB without source cols): migrated cleanly, legacy row preserved with NULL source.
+(Captured via check-idempotent.mjs; see commit history.)
+
+=== captured at 2026-05-08T09:14:06-04:00 ===

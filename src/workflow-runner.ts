@@ -68,14 +68,17 @@ function newId(): string {
 }
 
 /** Insert a mission_task to record this stage execution AND mark it
- *  running atomically so the scheduler poll won't claim it. */
+ *  running atomically so the scheduler poll won't claim it.
+ *  Slice 9 Wave 0: stamp source='workflow' + source_id=<runId> so the
+ *  Activity feed groups every stage in a run under one workflow row. */
 function recordMissionTaskForStage(
   agentId: string,
   title: string,
   prompt: string,
+  runId: string,
 ): string {
   const id = newId();
-  createMissionTask(id, title, prompt, agentId, 'workflow', 5);
+  createMissionTask(id, title, prompt, agentId, 'workflow', 5, 'workflow', runId);
   // Flip to running immediately. We do NOT use claimNextMissionTask
   // because that path is owned by src/scheduler.ts; we own these rows.
   // Direct UPDATE keeps this surgical.
@@ -192,7 +195,7 @@ async function runSequentialStage(
   const prompt = interpolatePrompt(stage.prompt, { input: payload.input, previous_output: previousOutput });
   const stageRowId = createWorkflowStage(runId, stageIdx, 'sequential', stage.agent, attempt);
   const title = `wf:${def.slug}#${stageIdx} ${stage.name} (attempt ${attempt})`;
-  const missionId = recordMissionTaskForStage(stage.agent, title, prompt);
+  const missionId = recordMissionTaskForStage(stage.agent, title, prompt, runId);
   setWorkflowStageMissionTask(stageRowId, missionId);
 
   const ac = new AbortController();
@@ -261,7 +264,7 @@ async function runCouncilStage(
     const stageRowId = createWorkflowStage(runId, stageIdx, 'council', memberAgent, attempt);
     memberStageIds.push(stageRowId);
     const title = `wf:${def.slug}#${stageIdx} council/${memberAgent} (attempt ${attempt})`;
-    const missionId = recordMissionTaskForStage(memberAgent, title, prompt);
+    const missionId = recordMissionTaskForStage(memberAgent, title, prompt, runId);
     memberMissionIds.push(missionId);
     setWorkflowStageMissionTask(stageRowId, missionId);
 
@@ -347,6 +350,10 @@ async function handleStageFailure(
     `Full history:\n${history}\n\n` +
     `Original input:\n${payload.input}`;
   const escalationId = newId();
+  // Slice 9 Wave 0: escalations are still part of this workflow run, so
+  // tag them with the same source/source_id pair. The Activity feed
+  // groups them under the same workflow row but the priority=8 + the
+  // [ESCALATION] title prefix keeps them visually distinct.
   createMissionTask(
     escalationId,
     `[ESCALATION] ${def.slug}/${stage.name} failed`,
@@ -354,6 +361,8 @@ async function handleStageFailure(
     escalateTo,
     'workflow-escalation',
     8,
+    'workflow',
+    runId,
   );
   payload.last_error = `escalated to ${escalateTo ?? 'human (unassigned)'} as task ${escalationId}`;
   updateWorkflowRunState(runId, 'escalated', JSON.stringify(payload), stageIdx);

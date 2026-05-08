@@ -182,15 +182,30 @@ async function sendTelegram(text: string): Promise<void> {
   }
 }
 
-function queueMission(agent: string, title: string, prompt: string, createdBy = 'watcher', silentStart = false, silentResult = false): string {
+/**
+ * Combined: silent_start/silent_result + Slice 9 Wave 0 source/source_id
+ * provenance. Source is one of 'webhook' | 'log-tail' | 'sqlite-poll'
+ * (slug-for-webhooks / name-for-others). All trailing args default-null/false
+ * so legacy callers keep working.
+ */
+function queueMission(
+  agent: string,
+  title: string,
+  prompt: string,
+  createdBy = 'watcher',
+  silentStart = false,
+  silentResult = false,
+  source: string | null = null,
+  sourceId: string | null = null,
+): string {
   const db = new Database(storeDbPath());
   try {
     const id = `wat_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     db.prepare(
-      `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, priority, created_at, created_by, silent_start, silent_result)
-       VALUES (?, ?, ?, ?, 'queued', 50, ?, ?, ?, ?)`,
-    ).run(id, title, prompt, agent, Math.floor(Date.now() / 1000), createdBy, silentStart ? 1 : 0, silentResult ? 1 : 0);
-    logger.info({ id, agent, title, createdBy, silentStart, silentResult }, 'watcher: queued mission task');
+      `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, priority, created_at, created_by, silent_start, silent_result, source, source_id)
+       VALUES (?, ?, ?, ?, 'queued', 50, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, title, prompt, agent, Math.floor(Date.now() / 1000), createdBy, silentStart ? 1 : 0, silentResult ? 1 : 0, source, sourceId);
+    logger.info({ id, agent, title, createdBy, silentStart, silentResult, source, sourceId }, 'watcher: queued mission task');
     return id;
   } finally {
     db.close();
@@ -382,11 +397,27 @@ async function sendSlack(template: string, channel: string | undefined, webhookU
 }
 
 /**
+ * Slice 9 Wave 0: provenance propagated to mission_tasks rows so the
+ * Activity feed can label each task with the spec that fired it. The
+ * caller (dashboard webhook handler, log-tail loop, sqlite-poll loop)
+ * supplies the pair; nested actions recurse with the same pair so an
+ * if-owned → queue-mission still records the correct source.
+ */
+export interface ActionSource {
+  source: 'webhook' | 'log-tail' | 'sqlite-poll';
+  source_id: string;
+}
+
+/**
  * Run a list of actions with the given variable substitutions. Returns
  * the list of mission_task IDs produced (used by the webhook dispatcher
  * to surface "what just got queued" back to the caller).
  */
-export async function runActions(actions: Action[], vars: Record<string, unknown>): Promise<string[]> {
+export async function runActions(
+  actions: Action[],
+  vars: Record<string, unknown>,
+  src: ActionSource | null = null,
+): Promise<string[]> {
   const queuedIds: string[] = [];
   // Flatten primitive vars one level so legacy templates like {match}/{line}
   // and the new {payload.field} both work without rewriting existing entries.
@@ -408,7 +439,16 @@ export async function runActions(actions: Action[], vars: Record<string, unknown
         // is a no-op on a string with no `{name}` patterns, so this is
         // backwards compatible with all existing watcher entries.
         const agent = substitute(m.agent, vars);
-        const id = queueMission(agent, substitute(m.title, vars), substitute(m.prompt, vars), 'watcher', !!m.silent_start, !!m.silent_result);
+        const id = queueMission(
+          agent,
+          substitute(m.title, vars),
+          substitute(m.prompt, vars),
+          'watcher',
+          !!m.silent_start,
+          !!m.silent_result,
+          src?.source ?? null,
+          src?.source_id ?? null,
+        );
         queuedIds.push(id);
       } else if ('mark-meet-stale' in a) {
         const idField = a['mark-meet-stale'].id_field || 'id';
@@ -424,7 +464,16 @@ export async function runActions(actions: Action[], vars: Record<string, unknown
           ? substitute(m.prompt, vars)
           : `Run the \`${m.skill}\` skill with this payload:\n\n${typeof vars.payload === 'string' ? vars.payload : JSON.stringify(vars.payload ?? vars, null, 2)}`;
         const prompt = `[Triggered via webhook · skill=${m.skill}]\n\n${basePrompt}`;
-        const id = queueMission(m.agent, title, prompt, 'watcher:webhook', !!m.silent_start, !!m.silent_result);
+        const id = queueMission(
+          m.agent,
+          title,
+          prompt,
+          'watcher:webhook',
+          !!m.silent_start,
+          !!m.silent_result,
+          src?.source ?? null,
+          src?.source_id ?? null,
+        );
         queuedIds.push(id);
       } else if ('lookup-owner' in a) {
         // Slice 4: side-effect — populate vars._owner_agent / _owner_found /
@@ -451,13 +500,13 @@ export async function runActions(actions: Action[], vars: Record<string, unknown
         // no lookup-owner ran first.
         if (vars._owner_found === true && vars._n8n_debounced !== true) {
           const nested = a['if-owned'];
-          const nestedIds = await runActions(nested, vars);
+          const nestedIds = await runActions(nested, vars, src);
           queuedIds.push(...nestedIds);
         }
       } else if ('if-unowned' in a) {
         if (vars._owner_found === false && vars._n8n_debounced !== true) {
           const nested = a['if-unowned'];
-          const nestedIds = await runActions(nested, vars);
+          const nestedIds = await runActions(nested, vars, src);
           queuedIds.push(...nestedIds);
         }
       } else if ('send-slack' in a) {
@@ -716,7 +765,11 @@ function startLogTail(cfg: LogTailWatcherCfg): void {
         const now = Date.now();
         if (debounce > 0 && lastFireAt[trig.regex] && now - lastFireAt[trig.regex] < debounce) continue;
         lastFireAt[trig.regex] = now;
-        await runActions(trig.actions, { match: m[0], line, watcher: cfg.name });
+        await runActions(
+          trig.actions,
+          { match: m[0], line, watcher: cfg.name },
+          { source: 'log-tail', source_id: cfg.name },
+        );
       }
     }
   });
@@ -750,7 +803,7 @@ function startSqlitePoll(cfg: SqlitePollWatcherCfg, cursors: Record<string, numb
         for (const [k, v] of Object.entries(row)) {
           vars[k] = v === null ? '' : (v as string | number);
         }
-        await runActions(cfg.actions, vars);
+        await runActions(cfg.actions, vars, { source: 'sqlite-poll', source_id: cfg.name });
       }
       if (newest > lastSeen) {
         cursors[cfg.name] = newest;

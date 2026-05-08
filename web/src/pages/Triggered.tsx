@@ -626,7 +626,10 @@ function WatcherFormModal({
             </div>
           )}
           <div class="text-[10.5px] text-[var(--color-text-faint)] mt-1 font-mono">
-            URL: /api/watchers/webhook/{slug || '<slug>'}
+            {/* Slice 9 Wave 0: canonical public path is /api/hooks/<slug>.
+                The legacy /api/watchers/webhook/<slug> still works server-side
+                so any pre-printed URL stays valid, but new wiring lands here. */}
+            URL: /api/hooks/{slug || '<slug>'}
           </div>
         </div>
 

@@ -232,11 +232,22 @@ function createSchema(database: Database.Database): void {
       started_at      INTEGER,
       completed_at    INTEGER,
       silent_start    INTEGER NOT NULL DEFAULT 0,
-      silent_result   INTEGER NOT NULL DEFAULT 0
+      silent_result   INTEGER NOT NULL DEFAULT 0,
+      -- Slice 9 Wave 0: provenance fields. Both nullable so legacy rows
+      -- continue to load unchanged ("manual / unknown" in the UI). source
+      -- is one of: webhook | scheduled | workflow | manual | mission_cli |
+      -- log-tail | sqlite-poll. source_id points to the spec that fired
+      -- the task (watcher slug, scheduled_task id, workflow_run id, etc).
+      source          TEXT,
+      source_id       TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_mission_status
       ON mission_tasks(assigned_agent, status, priority DESC, created_at ASC);
+    -- Slice 9 Wave 0: idx_mission_source (on source, source_id) is created
+    -- in runMigrations() AFTER addColumnIfMissing has guaranteed the
+    -- columns exist. Putting it here would crash on legacy DBs whose
+    -- mission_tasks table predates the additive migration.
 
     CREATE TABLE IF NOT EXISTS meet_sessions (
       id              TEXT PRIMARY KEY,         -- session id from the provider's join response
@@ -742,6 +753,18 @@ function runMigrations(database: Database.Database): void {
     `);
     logger.info('Migration: made mission_tasks.assigned_agent nullable');
   }
+
+  // Slice 9 Wave 0: provenance columns on mission_tasks. Additive, NULL-safe.
+  // Legacy rows stay NULL and surface as "manual / unknown" in the UI.
+  // source is one of: webhook | scheduled | workflow | manual | mission_cli
+  // | log-tail | sqlite-poll. source_id is the watcher slug, scheduled_task
+  // id, workflow_run id, etc. The combined index supports /api/activity
+  // filters by source + source_id without scanning unrelated rows.
+  addColumnIfMissing(database, 'mission_tasks', 'source', 'TEXT');
+  addColumnIfMissing(database, 'mission_tasks', 'source_id', 'TEXT');
+  database.exec(
+    `CREATE INDEX IF NOT EXISTS idx_mission_source ON mission_tasks(source, source_id, created_at DESC)`,
+  );
 
   // Live Meetings: add provider column so we can track which platform
   // each session used (pika avatar vs recall voice-only). Default 'pika'
@@ -1476,6 +1499,11 @@ export function getDueTasks(agentId = 'main'): ScheduledTask[] {
       `SELECT * FROM scheduled_tasks WHERE status = 'active' AND next_run <= ? AND agent_id = ? ORDER BY next_run`,
     )
     .all(now, agentId) as ScheduledTask[];
+}
+
+/** Slice 9 Wave 0: lookup helper for the Activity feed source-label join. */
+export function getScheduledTask(id: string): ScheduledTask | null {
+  return (db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id) as ScheduledTask) ?? null;
 }
 
 export function getAllScheduledTasks(agentId?: string): ScheduledTask[] {
@@ -2489,6 +2517,9 @@ export interface MissionTask {
   completed_at: number | null;
   silent_start: number;
   silent_result: number;
+  // Slice 9 Wave 0: provenance. Both nullable so legacy rows load fine.
+  source: string | null;
+  source_id: string | null;
 }
 
 export function createMissionTask(
@@ -2500,12 +2531,16 @@ export function createMissionTask(
   priority = 0,
   silentStart = false,
   silentResult = false,
+  // Slice 9 Wave 0: optional provenance. Default NULL preserves backwards
+  // compat with every existing caller; new callers populate explicitly.
+  source: string | null = null,
+  sourceId: string | null = null,
 ): void {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
-    `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, created_by, priority, created_at, silent_start, silent_result)
-     VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)`,
-  ).run(id, title, prompt, assignedAgent, createdBy, priority, now, silentStart ? 1 : 0, silentResult ? 1 : 0);
+    `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, created_by, priority, created_at, silent_start, silent_result, source, source_id)
+     VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, title, prompt, assignedAgent, createdBy, priority, now, silentStart ? 1 : 0, silentResult ? 1 : 0, source, sourceId);
 }
 
 export function setMissionTaskSilent(id: string, silentStart?: boolean, silentResult?: boolean): void {
@@ -2666,6 +2701,103 @@ export function resetStuckMissionTasks(agentId: string): number {
     `UPDATE mission_tasks SET status = 'queued', started_at = NULL WHERE status = 'running' AND assigned_agent = ?`,
   ).run(agentId);
   return result.changes;
+}
+
+// ── Slice 9 Wave 0: Activity feed query ──────────────────────────────
+//
+// Combined feed over mission_tasks, optionally filtered by source,
+// source_id, agent, status, and a since unix-seconds floor. The `activity`
+// concept is just "every mission_task with provenance metadata pulled in
+// for the UI" — there's no separate activity table. Source labels are
+// joined per-row in the API layer (cheap: <500 rows max per page,
+// scheduled_tasks/workflow_runs lookups by primary key are O(1)).
+
+export interface ActivityRow extends MissionTask {
+  duration_ms: number | null;
+  result_summary: string | null;
+}
+
+export interface ActivityFilters {
+  sources?: string[];           // any of: webhook | scheduled | workflow | manual | mission_cli | log-tail | sqlite-poll
+  source_id?: string;
+  agent?: string;
+  statuses?: string[];          // any of: queued | running | completed | failed | cancelled
+  since?: number;               // unix seconds
+  limit?: number;               // default 50, max 500
+  cursor?: string;              // opaque — opaque from caller's POV; internally = last seen mission_task id
+}
+
+export function listActivity(filters: ActivityFilters): { rows: ActivityRow[]; next_cursor: string | null } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (filters.sources && filters.sources.length > 0) {
+    // IN (?, ?, …) — bind each value individually so sqlite can plan it.
+    conditions.push(`source IN (${filters.sources.map(() => '?').join(', ')})`);
+    params.push(...filters.sources);
+  }
+  if (filters.source_id) {
+    conditions.push('source_id = ?');
+    params.push(filters.source_id);
+  }
+  if (filters.agent) {
+    conditions.push('assigned_agent = ?');
+    params.push(filters.agent);
+  }
+  if (filters.statuses && filters.statuses.length > 0) {
+    conditions.push(`status IN (${filters.statuses.map(() => '?').join(', ')})`);
+    params.push(...filters.statuses);
+  }
+  if (typeof filters.since === 'number' && Number.isFinite(filters.since)) {
+    conditions.push('created_at >= ?');
+    params.push(Math.floor(filters.since));
+  }
+  // Cursor pagination: rows are ordered by (created_at DESC, id DESC) so
+  // the cursor is the (created_at, id) pair of the last row from the prior
+  // page, encoded by id alone since id is a uuid+timestamp string in
+  // practice. To keep the cursor opaque-but-recoverable we look the row
+  // up by id and use its created_at to build a strict-less-than predicate.
+  if (filters.cursor) {
+    const cursorRow = db
+      .prepare('SELECT created_at, id FROM mission_tasks WHERE id = ?')
+      .get(filters.cursor) as { created_at: number; id: string } | undefined;
+    if (cursorRow) {
+      conditions.push('(created_at < ? OR (created_at = ? AND id < ?))');
+      params.push(cursorRow.created_at, cursorRow.created_at, cursorRow.id);
+    }
+    // If cursor is unknown (row deleted), the spec is "treat as start" —
+    // we just don't apply the cursor filter at all. Caller still sees
+    // every row from the top; eventual consistency is fine here.
+  }
+
+  const where = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
+  const limit = Math.max(1, Math.min(filters.limit ?? 50, 500));
+  // +1 fetch trick — peek at one extra row to know if there's another page
+  // without a separate COUNT query.
+  const rows = db
+    .prepare(
+      `SELECT * FROM mission_tasks${where}
+       ORDER BY created_at DESC, id DESC
+       LIMIT ?`,
+    )
+    .all(...params, limit + 1) as MissionTask[];
+
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const next_cursor = hasMore ? page[page.length - 1]!.id : null;
+
+  const enriched: ActivityRow[] = page.map((r) => ({
+    ...r,
+    duration_ms:
+      r.started_at != null && r.completed_at != null
+        ? (r.completed_at - r.started_at) * 1000
+        : null,
+    // Trim result so a giant agent transcript doesn't blow the response
+    // size. Full result is still available via /api/mission/tasks/:id.
+    result_summary: r.result ? r.result.slice(0, 200) : null,
+  }));
+
+  return { rows: enriched, next_cursor };
 }
 
 // ── Workflow Runs / Stages (Slice 6) ────────────────────────────────

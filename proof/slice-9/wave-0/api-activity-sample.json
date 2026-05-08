@@ -1,0 +1,75 @@
+{
+  "activity": [
+    {
+      "id": "wfr_001",
+      "agent_id": "meta",
+      "title": "wf:bug-hunt-council#0 triage (attempt 1)",
+      "status": "completed",
+      "source": "workflow",
+      "source_id": "wfr_2026050801",
+      "source_label": "wfr_2026050801 (bug-hunt-council)",
+      "created_at": 1778246073,
+      "started_at": 1778246013,
+      "completed_at": 1778246043,
+      "duration_ms": 30000,
+      "result_summary": "Triage verdict: investigate. Spawning fix stage."
+    },
+    {
+      "id": "wat_bbb",
+      "agent_id": "trading-monitor",
+      "title": "Ceddi signal: BUY XAUUSD",
+      "status": "running",
+      "source": "webhook",
+      "source_id": "trading-monitor",
+      "source_label": "trading-monitor (Ingest webhook)",
+      "created_at": 1778246073,
+      "started_at": 1778246069,
+      "completed_at": null,
+      "duration_ms": null,
+      "result_summary": null
+    },
+    {
+      "id": "wat_aaa",
+      "agent_id": "trading-monitor",
+      "title": "Ingest signal: goldsignals_swing buy 2350",
+      "status": "completed",
+      "source": "webhook",
+      "source_id": "trading-monitor-ingest",
+      "source_label": "trading-monitor-ingest (Ingest webhook)",
+      "created_at": 1778246073,
+      "started_at": 1778246063,
+      "completed_at": 1778246066,
+      "duration_ms": 3000,
+      "result_summary": "Logged signal to hive_mind: XXX=*** SIDE=..."
+    },
+    {
+      "id": "man_222",
+      "agent_id": "main",
+      "title": "Ad-hoc: review stuck task",
+      "status": "queued",
+      "source": "manual",
+      "source_id": null,
+      "source_label": "manual (dashboard)",
+      "created_at": 1778246073,
+      "started_at": null,
+      "completed_at": null,
+      "duration_ms": null,
+      "result_summary": null
+    },
+    {
+      "id": "legacy",
+      "agent_id": "main",
+      "title": "A pre-migration row",
+      "status": "queued",
+      "source": null,
+      "source_id": null,
+      "source_label": "manual / unknown",
+      "created_at": 1778246073,
+      "started_at": null,
+      "completed_at": null,
+      "duration_ms": null,
+      "result_summary": null
+    }
+  ],
+  "next_cursor": "legacy"
+}

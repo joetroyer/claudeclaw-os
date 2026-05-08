@@ -7,6 +7,25 @@ import fs from 'fs';
 import path from 'path';
 import { AGENT_ID, ALLOWED_CHAT_ID, DASHBOARD_PORT, DASHBOARD_TOKEN, DASHBOARD_URL, PROJECT_ROOT, STORE_DIR, WHATSAPP_ENABLED, SLACK_USER_TOKEN, CONTEXT_LIMIT, agentDefaultModel, CLAUDECLAW_CONFIG } from './config.js';
 import crypto from 'crypto';
+
+/** Pick a small allowlist of headers so we don't store auth/cookie data. */
+function safeHeaders(c: any): Record<string, string> {
+  const want = ['user-agent', 'content-type', 'x-forwarded-for', 'cf-connecting-ip', 'x-claudeclaw-signature', 'x-hub-signature-256'];
+  const out: Record<string, string> = {};
+  for (const h of want) {
+    const v = c.req.header(h);
+    if (typeof v === 'string') out[h] = v;
+  }
+  return out;
+}
+
+function getRemoteIp(c: any): string {
+  return (
+    c.req.header('cf-connecting-ip') ||
+    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+    'unknown'
+  );
+}
 import {
   getAllScheduledTasks,
   deleteScheduledTask,
@@ -113,6 +132,7 @@ import { getWarRoomPickerHtml } from './warroom-text-picker-html.js';
 import { getWarRoomTextHtml } from './warroom-text-html.js';
 import { handleTextTurn, cancelMeetingTurns, getRoster, warmupMeeting, isWarmupDone, getActiveTurnIds, waitForMeetingTurnsIdle } from './warroom-text-orchestrator.js';
 import { getChannel, closeChannel, startChannelSweeper } from './warroom-text-events.js';
+import { startMeetSessionPoller } from './meet-session-poller.js';
 import {
   createTextMeeting,
   getTextMeeting,
@@ -2836,7 +2856,13 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
         template: body?.template?.trim() || undefined,
         botToken,
       });
-      return c.json({ ok: true, ...result }, 201);
+      // Auto-activate immediately after creation so the agent starts
+      // without requiring a separate dashboard action.
+      const activation = activateAgent(id);
+      if (!activation.ok) {
+        logger.warn({ agentId: id, error: activation.error }, 'Agent created but auto-activation failed');
+      }
+      return c.json({ ok: true, ...result, activated: activation.ok, activationError: activation.error }, 201);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return c.json({ error: msg }, 400);
@@ -2895,7 +2921,11 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
   app.get('/api/agents/:id/avatar', async (c) => {
     const agentId = c.req.param('id');
     if (!AGENT_ID_RE.test(agentId)) return c.json({ error: 'invalid id' }, 400);
-    if (!agentExists(agentId)) return c.json({ error: 'agent not found' }, 404);
+    // No agentExists check: the dashboard pre-fetches avatars for the
+    // agent-creation wizard's templates (research/comms/content/ops),
+    // which have bundled art in warroom/avatars/<id>.png but no agent.yaml
+    // until the user creates them. The resolver returns null for unknown
+    // ids, and we 204 from there. Upload (PUT) still requires agentExists.
     const ctxQ = c.req.query('context');
     const context: 'default' | 'meet' = ctxQ === 'meet' ? 'meet' : 'default';
 
@@ -3201,7 +3231,8 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
   app.get('/api/hive-mind', (c) => {
     const agentId = c.req.query('agent');
     const limit = parseInt(c.req.query('limit') || '20', 10);
-    const entries = getHiveMindEntries(limit, agentId || undefined);
+    const q = c.req.query('q');
+    const entries = getHiveMindEntries(limit, agentId || undefined, q || undefined);
     return c.json({ entries });
   });
 
@@ -3347,6 +3378,11 @@ export function startDashboard(botApi?: Api<RawApi>): void {
     // Start the text War Room channel sweeper so abandoned meetings
     // don't accumulate MeetingChannel instances in memory.
     startChannelSweeper();
+    // Background reconciler: every 30s, mark Pika/Daily meet sessions
+    // as `left` once the upstream provider says they ended. Without
+    // this, ending a meeting from the user's side leaves the row stuck
+    // on `live` until manual Leave or bot restart.
+    startMeetSessionPoller();
   } catch (err: any) {
     if (err?.code === 'EADDRINUSE') {
       logger.error({ port: DASHBOARD_PORT }, 'Dashboard port already in use. Change DASHBOARD_PORT in .env or kill the process using port %d.', DASHBOARD_PORT);
@@ -3384,11 +3420,15 @@ export function startDashboard(botApi?: Api<RawApi>): void {
         const url = new URL(req.url || '/', `http://${req.headers.host}`);
         if (url.pathname !== '/ws/warroom') return;
 
-        // Enforce the same token gate Hono enforces on every other route.
-        // Without this, anyone who can reach the dashboard port could
-        // proxy into the local Pipecat War Room socket with no auth.
+        // Enforce the same token gate Hono enforces on every other route,
+        // plus the Cloudflare Access JWT bypass: a request that comes
+        // through cloudflared has been auth'd at the edge, and the only
+        // path that injects this header is the tunnel itself (origin is
+        // bound to 127.0.0.1).
         const token = url.searchParams.get('token');
-        if (!DASHBOARD_TOKEN || token !== DASHBOARD_TOKEN) {
+        const tokenOk = !!DASHBOARD_TOKEN && token === DASHBOARD_TOKEN;
+        const cfAccessOk = !!req.headers['cf-access-jwt-assertion'];
+        if (!tokenOk && !cfAccessOk) {
           socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
           socket.destroy();
           return;

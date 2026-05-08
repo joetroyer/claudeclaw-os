@@ -3,8 +3,8 @@ import {
   Brain, Network, Activity, ShieldCheck,
   Swords, Workflow,
   Settings,
-  Webhook,
   Gauge,
+  Webhook,
 } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
 

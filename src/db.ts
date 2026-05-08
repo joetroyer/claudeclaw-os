@@ -2168,15 +2168,26 @@ export function logToHiveMind(
   ).run(agentId, chatId, action, summary, artifacts ?? null, now);
 }
 
-export function getHiveMindEntries(limit = 20, agentId?: string): HiveMindEntry[] {
+export function getHiveMindEntries(limit = 20, agentId?: string, query?: string): HiveMindEntry[] {
+  // Optional substring search across action/summary/artifacts. Lets the
+  // dashboard search bar find e.g. a mission task uuid stashed in
+  // artifacts JSON or a keyword from the agent's logged action.
+  const conds: string[] = [];
+  const params: unknown[] = [];
   if (agentId) {
-    return db
-      .prepare('SELECT * FROM hive_mind WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?')
-      .all(agentId, limit) as HiveMindEntry[];
+    conds.push('agent_id = ?');
+    params.push(agentId);
   }
+  if (query && query.trim()) {
+    const like = `%${query.trim().toLowerCase()}%`;
+    conds.push('(LOWER(action) LIKE ? OR LOWER(summary) LIKE ? OR LOWER(IFNULL(artifacts,\'\')) LIKE ?)');
+    params.push(like, like, like);
+  }
+  const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
+  params.push(limit);
   return db
-    .prepare('SELECT * FROM hive_mind ORDER BY created_at DESC LIMIT ?')
-    .all(limit) as HiveMindEntry[];
+    .prepare(`SELECT * FROM hive_mind ${where} ORDER BY created_at DESC LIMIT ?`)
+    .all(...params) as HiveMindEntry[];
 }
 
 /**
@@ -2532,6 +2543,34 @@ export function completeMissionTask(
   db.prepare(
     `UPDATE mission_tasks SET status = ?, result = ?, error = ?, completed_at = ? WHERE id = ?`,
   ).run(status, result, error ?? null, now, id);
+
+  // Auto-log to hive_mind so the cross-agent activity view actually
+  // populates. The agent CLAUDE.md prompts agents to do this themselves
+  // via `sqlite3 ... INSERT INTO hive_mind`, but in practice they
+  // skip it. Logging from completion ensures every finished mission
+  // task lands in Hive Mind without depending on agent compliance.
+  try {
+    const task = db.prepare(
+      `SELECT title, assigned_agent FROM mission_tasks WHERE id = ?`,
+    ).get(id) as { title?: string; assigned_agent?: string } | undefined;
+    if (task) {
+      const agent = task.assigned_agent || 'main';
+      const summary = (status === 'completed' ? (result ?? '') : (error ?? 'failed')).slice(0, 500);
+      // chat_id source: ALLOWED_CHAT_ID is the canonical user-facing chat
+      // for this install. Empty fallback keeps the NOT NULL constraint
+      // happy without faking a real chat id.
+      const chatId = process.env.ALLOWED_CHAT_ID || 'dashboard';
+      // Stash the mission task id in artifacts so searching the hive
+      // for the task uuid (or a prefix) actually finds the entry.
+      const artifacts = JSON.stringify({ task_id: id, source: 'mission' });
+      db.prepare(
+        `INSERT INTO hive_mind (agent_id, chat_id, action, summary, artifacts, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(agent, chatId, `mission task ${status}: ${task.title ?? id}`, summary, artifacts, now);
+    }
+  } catch {
+    // Hive logging is best-effort. Never let a hive insert failure roll
+    // back the user's actual task completion update.
+  }
 }
 
 export function cancelMissionTask(id: string): boolean {

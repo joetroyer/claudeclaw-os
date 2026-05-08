@@ -56,6 +56,14 @@ export interface AgentConfig {
   /** Display name shown in the meeting ("Your Agent wants to join"). Falls
    *  back to the agent's name or id with first letter capitalized. */
   meetBotName?: string;
+  /** Gradium voice id used for Telegram voice replies (and War Room voice
+   *  once that pipeline is migrated). Falls back to the global
+   *  GRADIUM_VOICE_ID env var if unset. */
+  gradiumVoiceId?: string;
+  /** TTS playback speed multiplier (e.g. 1.25 = 25% faster).
+   *  Applied via ffmpeg atempo post-processing after synthesis.
+   *  Falls back to TTS_SPEED env var, then 1.25 default. */
+  ttsSpeed?: number;
 }
 
 /**
@@ -135,6 +143,8 @@ export function loadAgentConfig(agentId: string): AgentConfig {
   const warroomTools = raw['warroom_tools'] as string[] | undefined;
   const meetVoiceId = typeof raw['meet_voice_id'] === 'string' ? (raw['meet_voice_id'] as string) : undefined;
   const meetBotName = typeof raw['meet_bot_name'] === 'string' ? (raw['meet_bot_name'] as string) : undefined;
+  const gradiumVoiceId = typeof raw['gradium_voice_id'] === 'string' ? (raw['gradium_voice_id'] as string) : undefined;
+  const ttsSpeed = typeof raw['tts_speed'] === 'number' ? (raw['tts_speed'] as number) : undefined;
 
   return {
     name,
@@ -147,6 +157,8 @@ export function loadAgentConfig(agentId: string): AgentConfig {
     obsidian,
     meetVoiceId,
     meetBotName,
+    gradiumVoiceId,
+    ttsSpeed,
   };
 }
 

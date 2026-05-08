@@ -91,11 +91,14 @@ watchers:
   # Bridge: supabase/functions/clawos-ceddi-bridge/.
   # Stance: HIGH-attention. Agent may escalate to Telegram ping.
   # Payload is MINIMAL — agent fetches fresh row data via PostgREST.
+  # PAUSED until trading-monitor agent is bootstrapped (needs
+  # TRADING_MONITOR_BOT_TOKEN in .env + launchctl bootstrap). Switch
+  # mode back to `test` (or `run`) once the agent is alive.
   - name: trading-monitor-trigger
     type: webhook
     slug: trading-monitor
     secret_env: TRADING_MONITOR_SECRET
-    mode: test
+    mode: preview
     actions:
       - queue-mission:
           agent: trading-monitor
@@ -146,11 +149,13 @@ watchers:
   # goldsignals_intraday. Bridge: supabase/functions/clawos-ingest-bridge/.
   # Stance: SILENT. Log only. Never escalate to Telegram from this path.
   # Payload is MINIMAL — agent fetches fresh row via analysis-schema PostgREST.
+  # PAUSED with the live-broker watcher above — same reason. Set back
+  # to `test`/`run` once trading-monitor agent is bootstrapped.
   - name: trading-monitor-ingest
     type: webhook
     slug: trading-monitor-ingest
     secret_env: TRADING_MONITOR_INGEST_SECRET
-    mode: test
+    mode: preview
     actions:
       - queue-mission:
           agent: trading-monitor

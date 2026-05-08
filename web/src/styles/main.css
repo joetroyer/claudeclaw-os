@@ -217,6 +217,55 @@ input, textarea, select {
   animation: kanban-pulse-frames 1500ms ease-out;
 }
 
+/* Slice 10 Wave 2 — Org Chart V2 tree connector rails.
+   .org-chart-children is the container that holds a parent's children.
+   It draws a vertical line on its left edge that runs the full height
+   of the children block.
+   .org-chart-child-rail wraps each individual child branch and draws a
+   horizontal stub that meets the vertical rail just above the child
+   card's avatar (≈28px from the top — the centerline of the 40px
+   avatar plus the card's top padding).
+   The last child trims its vertical-rail extension below the stub so
+   the line doesn't dangle past the final sibling. */
+.org-chart-children {
+  position: relative;
+}
+.org-chart-children::before {
+  content: '';
+  position: absolute;
+  left: -14px;
+  top: 0;
+  bottom: 14px;
+  width: 1px;
+  background: var(--color-border-strong);
+  pointer-events: none;
+}
+.org-chart-child-rail {
+  position: relative;
+}
+.org-chart-child-rail::before {
+  content: '';
+  position: absolute;
+  left: -14px;
+  top: 28px;
+  width: 14px;
+  height: 1px;
+  background: var(--color-border-strong);
+  pointer-events: none;
+}
+.org-chart-child-rail:last-child::after {
+  /* Mask the parent's vertical rail below this stub — gives a clean
+     L-shape on the last sibling without JS. */
+  content: '';
+  position: absolute;
+  left: -15px;
+  top: 29px;
+  bottom: -14px;
+  width: 2px;
+  background: var(--color-bg);
+  pointer-events: none;
+}
+
 /* Privacy blur — used on Memories + Hive Mind summaries when the user
    wants the page screenshot-safe. Click-to-reveal per row, hover lightens
    so you can preview without committing. The .revealed class trumps the

@@ -657,12 +657,18 @@ function Toolbar(p: ToolbarProps) {
       class="flex flex-wrap items-center gap-2 px-4 sm:px-6 py-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]"
       data-testid="org-chart-v2-toolbar"
     >
-      <div class="flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded bg-[var(--color-elevated)] text-[12px]">
-        <Search size={12} class="text-[var(--color-text-faint)]" />
+      {/* Search — MissionControl-style: leading magnifying glass, slim
+          input, focus ring uses the app accent. */}
+      <div class="relative flex-1 min-w-[160px] max-w-[260px]">
+        <Search
+          size={12}
+          class="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-text-faint)] pointer-events-none"
+          data-testid="org-chart-v2-search-icon"
+        />
         <input
           type="text"
-          placeholder="Search…"
-          class="bg-transparent outline-none text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] w-[140px] sm:w-[200px]"
+          placeholder="Search org chart…"
+          class="w-full min-h-[44px] bg-[var(--color-card)] border border-[var(--color-border)] rounded pl-7 pr-7 py-1.5 text-[12px] text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] outline-none focus:border-[var(--color-accent)] transition-colors"
           value={p.searchRaw}
           onInput={(e) => p.onSearch((e.target as HTMLInputElement).value)}
           data-testid="org-chart-v2-search"
@@ -670,7 +676,7 @@ function Toolbar(p: ToolbarProps) {
         {p.searchRaw && (
           <button
             type="button"
-            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-[var(--color-text-faint)] hover:text-[var(--color-text)]"
+            class="absolute right-1 top-1/2 -translate-y-1/2 min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-[var(--color-text-faint)] hover:text-[var(--color-text)]"
             onClick={() => p.onSearch('')}
             aria-label="Clear search"
           >
@@ -679,8 +685,9 @@ function Toolbar(p: ToolbarProps) {
         )}
       </div>
 
+      {/* Type-filter pills — inline, slim, no leading icon (the labels
+          already imply the filter). */}
       <div class="flex items-center gap-1 text-[11px]">
-        <Filter size={11} class="text-[var(--color-text-faint)]" />
         <FilterChip
           label="All"
           active={p.typeFilter === 'all'}
@@ -703,7 +710,7 @@ function Toolbar(p: ToolbarProps) {
 
       {p.lobOptions.length > 0 && (
         <select
-          class="text-[11px] px-3 py-2 min-h-[44px] min-w-[44px] rounded bg-[var(--color-elevated)] border border-[var(--color-border)] text-[var(--color-text)]"
+          class="text-[11px] min-h-[44px] px-2 py-1.5 rounded bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-text-muted)] outline-none focus:border-[var(--color-accent)]"
           value={p.lobFilter ?? ''}
           onChange={(e) => {
             const v = (e.target as HTMLSelectElement).value;
@@ -718,7 +725,7 @@ function Toolbar(p: ToolbarProps) {
 
       {p.projectOptions.length > 0 && (
         <select
-          class="text-[11px] px-3 py-2 min-h-[44px] min-w-[44px] rounded bg-[var(--color-elevated)] border border-[var(--color-border)] text-[var(--color-text)]"
+          class="text-[11px] min-h-[44px] px-2 py-1.5 rounded bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-text-muted)] outline-none focus:border-[var(--color-accent)]"
           value={p.projectFilter ?? ''}
           onChange={(e) => {
             const v = (e.target as HTMLSelectElement).value;
@@ -735,7 +742,7 @@ function Toolbar(p: ToolbarProps) {
         <button
           type="button"
           onClick={p.onExitFocus}
-          class="ml-auto inline-flex items-center gap-1 px-3 py-2 min-h-[44px] min-w-[44px] rounded text-[11px] bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:opacity-90"
+          class="ml-auto inline-flex items-center gap-1 px-2 py-1.5 min-h-[44px] rounded text-[11px] bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:opacity-90"
           data-testid="org-chart-v2-exit-focus"
         >
           <X size={11} />
@@ -761,8 +768,8 @@ function FilterChip({
       data-testid={testid}
       class={[
         // Min 44x44 touch target per WCAG 2.5.5 (Level AAA) /
-        // Apple HIG. Visual padding is generous.
-        'min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-3 py-2 rounded transition-colors',
+        // Apple HIG. Visual padding is tight; the size is hit-area only.
+        'min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-2.5 py-1.5 rounded text-[11px] transition-colors',
         active
           ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
           : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)]',
@@ -775,14 +782,14 @@ function FilterChip({
 
 function DepthPresets({ onPick }: { onPick: (d: number | 'all') => void }) {
   return (
-    <div class="inline-flex items-center bg-[var(--color-elevated)] border border-[var(--color-border)] rounded p-0.5 text-[11px]">
-      <span class="px-1.5 text-[var(--color-text-faint)]">Depth</span>
+    <div class="inline-flex items-center gap-0.5 bg-[var(--color-card)] border border-[var(--color-border)] rounded p-0.5 text-[11px]">
+      <span class="px-1.5 text-[var(--color-text-faint)] text-[10px] uppercase tracking-wider">Depth</span>
       {[1, 2, 3].map((d) => (
         <button
           key={d}
           type="button"
           onClick={() => onPick(d)}
-          class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-3 py-2 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-card)] transition-colors"
+          class="min-h-[44px] min-w-[36px] inline-flex items-center justify-center px-2 py-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
           data-testid={`org-chart-v2-depth-${d}`}
         >
           {d}
@@ -791,7 +798,7 @@ function DepthPresets({ onPick }: { onPick: (d: number | 'all') => void }) {
       <button
         type="button"
         onClick={() => onPick('all')}
-        class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-3 py-2 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-card)] transition-colors"
+        class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-2 py-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
         data-testid="org-chart-v2-depth-all"
       >
         All
@@ -833,13 +840,7 @@ function NodeBranch(p: BranchProps) {
   const highlighted = !!p.matchSet?.has(p.node.id);
 
   return (
-    <div
-      class="org-chart-branch"
-      style={{
-        // Indent visually using padding-left at each branch.
-        paddingLeft: p.node.depth === 0 ? '0' : '0',
-      }}
-    >
+    <div class="org-chart-branch">
       <NodeCard
         node={p.node}
         isOpen={isOpen}
@@ -857,11 +858,13 @@ function NodeBranch(p: BranchProps) {
       />
       {isOpen && hasChildren && (
         <div
-          class="ml-4 sm:ml-6 mt-2 pl-3 sm:pl-4 border-l border-[var(--color-border)] space-y-2 org-chart-children"
+          class="org-chart-children mt-2 ml-5 sm:ml-7 space-y-3"
           data-testid={`org-chart-v2-children-${p.node.id}`}
         >
           {p.node.children.map((c) => (
-            <NodeBranch key={c.id} {...p} node={c} />
+            <div key={c.id} class="org-chart-child-rail">
+              <NodeBranch {...p} node={c} />
+            </div>
           ))}
         </div>
       )}

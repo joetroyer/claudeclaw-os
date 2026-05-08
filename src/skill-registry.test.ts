@@ -9,6 +9,7 @@ import {
   matchSkills,
   getSkillInstructions,
   getAllSkills,
+  _stopSkillRegistryForTest,
 } from './skill-registry.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -48,6 +49,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Drain any pending fs.watch debounce timer + close watchers BEFORE
+  // we rm the temp dirs — otherwise a race-y rescan reads from a
+  // partially deleted tree.
+  _stopSkillRegistryForTest();
   process.env.HOME = origHome;
   fs.rmSync(tempRoot, { recursive: true, force: true });
   fs.rmSync(tempGlobal, { recursive: true, force: true });
@@ -302,3 +307,83 @@ describe('edge cases', () => {
     expect(alt!.name).toBe('Alt Skill');
   });
 });
+
+// ── Live reload via fs.watch ─────────────────────────────────────────
+
+describe('live reload (fs.watch)', () => {
+  it('picks up a new SKILL.md added to the project skills dir within 1s', async () => {
+    // Start with one skill. After init the registry has it AND has a
+    // recursive watcher on tempRoot/skills installed.
+    writeSkill(
+      path.join(tempRoot, 'skills'),
+      'initial',
+      `---\nname: Initial\ndescription: Was here at boot\ntriggers: initial\n---\n`,
+    );
+    initSkillRegistry(tempRoot);
+    expect(getAllSkills().find((s) => s.id === 'initial')).toBeDefined();
+    expect(getAllSkills().find((s) => s.id === 'newcomer')).toBeUndefined();
+
+    // Drop a fresh skill in. The watcher debounce is 500ms, so we wait
+    // up to 1.5s before asserting — gives the rescan headroom even on
+    // slow CI.
+    writeSkill(
+      path.join(tempRoot, 'skills'),
+      'newcomer',
+      `---\nname: Newcomer\ndescription: Added at runtime\ntriggers: newcomer\n---\n`,
+    );
+
+    const found = await waitFor(
+      () => Boolean(getAllSkills().find((s) => s.id === 'newcomer')),
+      1500,
+    );
+    expect(found).toBe(true);
+
+    const all = getAllSkills();
+    const nc = all.find((s) => s.id === 'newcomer');
+    expect(nc).toBeDefined();
+    expect(nc!.name).toBe('Newcomer');
+    expect(nc!.source).toBe('project');
+    // The original skill stays present.
+    expect(all.find((s) => s.id === 'initial')).toBeDefined();
+  });
+
+  it('picks up a new SKILL.md added to the global skills dir', async () => {
+    initSkillRegistry(tempRoot);
+    expect(getAllSkills()).toHaveLength(0);
+
+    writeSkill(
+      path.join(tempGlobal, '.claude', 'skills'),
+      'late-global',
+      `---\nname: Late Global\ndescription: Added after boot\n---\n`,
+    );
+
+    const found = await waitFor(
+      () => Boolean(getAllSkills().find((s) => s.id === 'late-global')),
+      1500,
+    );
+    expect(found).toBe(true);
+
+    const lg = getAllSkills().find((s) => s.id === 'late-global');
+    expect(lg!.source).toBe('global');
+  });
+
+  it('survives init being called against a missing global dir (no crash)', () => {
+    fs.rmSync(path.join(tempGlobal, '.claude', 'skills'), { recursive: true, force: true });
+    expect(() => initSkillRegistry(tempRoot)).not.toThrow();
+    // Watcher install on a missing dir is a no-op, not a throw.
+  });
+});
+
+/**
+ * Poll until predicate returns truthy or timeout elapses. Resolves with
+ * the last predicate value (true on success, false on timeout). Faster
+ * than a fixed setTimeout because we exit as soon as the rescan lands.
+ */
+async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (predicate()) return true;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return predicate();
+}

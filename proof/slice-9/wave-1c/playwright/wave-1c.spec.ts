@@ -33,6 +33,51 @@ test.describe('Slice 9 Wave 1C — Scheduled page health stats', () => {
     await page.waitForLoadState('networkidle');
   });
 
+  test('Card<->List view switch + zero console/page errors across all views', async ({ browser }) => {
+    // Fresh context + page so the console / pageerror listeners cover
+    // the entire lifecycle (initial nav, both views, and the round-trip
+    // re-render). Attaching listeners after page.goto would miss any
+    // errors emitted during the first paint.
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    const consoleErrors: string[] = [];
+    const pageErrors: string[] = [];
+    page.on('console', (msg) => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
+    page.on('pageerror', (err) => pageErrors.push(err.message));
+
+    await page.goto(`${DASHBOARD}/scheduled?token=${TOKEN}`);
+    await page.waitForLoadState('networkidle');
+
+    // Health rows only exist when at least one scheduled task is
+    // present. With zero tasks the page still has to render cleanly,
+    // but there's no view to toggle into.
+    const cardsExist = await page.getByTestId('view-cards').isVisible().catch(() => false);
+    if (cardsExist) {
+      // Card view by default.
+      await expect(page.getByTestId('view-cards')).toBeVisible();
+      await expect(page.getByTestId('health-summary').first()).toBeVisible();
+
+      // Switch to list view.
+      await page.getByTestId('view-toggle-list').click();
+      await expect(page.getByTestId('view-list')).toBeVisible();
+      await expect(page.getByTestId('view-cards')).toHaveCount(0);
+      // Health row still rendered in list mode (status cell of each row).
+      await expect(page.getByTestId('list-status-cell').first()).toBeVisible();
+      await expect(page.getByTestId('health-summary').first()).toBeVisible();
+
+      // Switch back and confirm round-trip.
+      await page.getByTestId('view-toggle-cards').click();
+      await expect(page.getByTestId('view-cards')).toBeVisible();
+      await expect(page.getByTestId('view-list')).toHaveCount(0);
+      await expect(page.getByTestId('health-summary').first()).toBeVisible();
+    }
+
+    expect(consoleErrors).toEqual([]);
+    expect(pageErrors).toEqual([]);
+    await page.close();
+    await ctx.close();
+  });
+
   test('renders the page header', async ({ page }) => {
     await expect(page.getByRole('heading', { name: /scheduled/i })).toBeVisible();
   });

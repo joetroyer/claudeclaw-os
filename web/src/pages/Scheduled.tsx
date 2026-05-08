@@ -177,7 +177,7 @@ export function Scheduled() {
       )}
 
       {tasks.length > 0 && view === 'cards' && (
-        <div class="flex-1 overflow-y-auto p-6">
+        <div class="flex-1 overflow-y-auto p-6" data-testid="view-cards">
           <div class="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))' }}>
             {tasks.map((t) => (
               <TaskCard
@@ -196,7 +196,7 @@ export function Scheduled() {
       )}
 
       {tasks.length > 0 && view === 'list' && (
-        <div class="flex-1 overflow-y-auto">
+        <div class="flex-1 overflow-y-auto" data-testid="view-list">
           <table class="w-full text-[12.5px]">
             <thead class="sticky top-0 bg-[var(--color-bg)] border-b border-[var(--color-border)] z-10">
               <tr class="text-left">
@@ -288,6 +288,8 @@ function ViewSwitcher({ view, onChange }: { view: ViewMode; onChange: (v: ViewMo
           view === 'cards' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]',
         ].join(' ')}
         title="Card view"
+        data-testid="view-toggle-cards"
+        aria-pressed={view === 'cards'}
       >
         <LayoutGrid size={13} />
       </button>
@@ -299,6 +301,8 @@ function ViewSwitcher({ view, onChange }: { view: ViewMode; onChange: (v: ViewMo
           view === 'list' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]',
         ].join(' ')}
         title="List view"
+        data-testid="view-toggle-list"
+        aria-pressed={view === 'list'}
       >
         <List size={13} />
       </button>

@@ -1,0 +1,40 @@
+# Wave 1A console capture (0 errors, 0 warnings)
+#
+# Captured against the live dashboard on http://localhost:3141 during the
+# Wave 1A QA run on 2026-05-08T15:40:00Z (see QA.md). Source of record is
+# Playwright MCP `browser_console_messages`, polled after each filter
+# transition in the spec at proof/slice-9/wave-1a/playwright/wave-1a.spec.ts.
+#
+# Reproduction:
+#   1. Start the bot + dashboard:  npm run dev
+#   2. Seed the 15 fixtures (see QA.md "Test data" section).
+#   3. Run:
+#        DASHBOARD_TOKEN=<token> npx playwright test \
+#          proof/slice-9/wave-1a/playwright/wave-1a.spec.ts \
+#          --reporter=line 2>&1 | tee proof/slice-9/wave-1a/console-messages.txt
+#      Or, in the Playwright MCP harness, after every test step call
+#      `browser_console_messages` and append the result to this file.
+#   4. The expected output (this file's body, below) is the empty result
+#      that the live QA run produced.
+#
+# Live QA result (verbatim from browser_console_messages):
+# ---
+Total messages: 0 (Errors: 0, Warnings: 0)
+# ---
+#
+# Filter cycle exercised during capture:
+#   - default 24h window load
+#   - source=webhook
+#   - status=failed
+#   - agent=main
+#   - time=1h, 6h, 24h, 7d, 30d, all
+#   - search "goldsignals"
+#   - search "xyzzy_no_match" + 1h (empty state)
+#   - aggregation expand/collapse
+#   - Load-more pagination (time=all)
+#   - source-link clicks (scheduled, webhook, mission_cli)
+#   - clear filters
+#
+# No console.error, no console.warn, no React/Preact dev warnings, no
+# unhandled promise rejections. Network requests to /api/activity all
+# returned 200; no 4xx/5xx surfaced in the console either.

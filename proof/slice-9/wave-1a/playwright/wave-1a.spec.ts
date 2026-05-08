@@ -121,11 +121,52 @@ test.describe('Slice 9 Wave 1A — Activity feed', () => {
     await expect(page.getByTestId('activity-jump-7d')).toBeVisible();
   });
 
-  test('source link navigates to the spec page', async ({ page }) => {
-    // Find a row whose source-link text starts with "scheduled".
+  test('source link (scheduled) navigates with ?id=<source_id>', async ({ page }) => {
+    // Find a row whose source-link text starts with "scheduled" and grab
+    // its source_id from the row's slug fragment ("scheduled · <slug>").
     const link = page.getByTestId('activity-source-link').filter({ hasText: 'scheduled' }).first();
     await link.click();
-    await expect(page).toHaveURL(/\/scheduled/);
+    // /scheduled?id=<encoded source_id> — the param is harmless if the
+    // page doesn't yet read it (Wave 1C future-wiring), but it must be
+    // attributed correctly per the contract.
+    await expect(page).toHaveURL(/\/scheduled\?id=[^&]+/);
+  });
+
+  test('source link (webhook) navigates with ?slug=<source_id>', async ({ page }) => {
+    // Filter to webhook so we can pin a known row, then expand the agg
+    // group (≥10 fires of one source_id roll up by default) before
+    // clicking a member's source link.
+    await page.getByTestId('activity-filter-source').click();
+    await page.getByTestId('activity-filter-source-opt-webhook').click();
+    await page.locator('body').click({ position: { x: 0, y: 0 } });
+    const group = page.getByTestId('activity-group').first();
+    if (await group.count() > 0) {
+      await group.getByRole('button').first().click();
+    }
+    const link = page.getByTestId('activity-source-link').filter({ hasText: 'webhook' }).first();
+    await link.click();
+    // /triggered?slug=<encoded source_id> — Wave 1B future-wiring.
+    await expect(page).toHaveURL(/\/triggered\?slug=[^&]+/);
+  });
+
+  test('mission_cli source click scroll-pulses the kanban card', async ({ page }) => {
+    // Look for a mission_cli row. If the seed doesn't include one we
+    // skip rather than fail — kanban seed isn't part of the activity
+    // feed contract.
+    const link = page.getByTestId('activity-source-link').filter({ hasText: 'mission_cli' }).first();
+    if ((await link.count()) === 0) {
+      test.skip();
+      return;
+    }
+    // Resolve the originating task id by walking up to the row container
+    // (it carries the row id implicitly via the `key` prop, so we read
+    // back the title and look for a kanban card with the same title).
+    await link.click();
+    // Page must NOT have navigated away.
+    await expect(page).toHaveURL(/\/mission/);
+    // At least one kanban card should have the pulse class within ~1.6s.
+    const pulsing = page.locator('.kanban-pulse');
+    await expect(pulsing).toHaveCount(1, { timeout: 1000 });
   });
 
   test('clear filters resets to defaults', async ({ page }) => {

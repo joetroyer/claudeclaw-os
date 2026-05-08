@@ -798,6 +798,25 @@ function runMigrations(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_webhook_payloads_slug
       ON webhook_payloads(watcher_slug, received_at DESC);
   `);
+
+  // ── Slice 4: n8n Auto-Tasks (workflow ownership lookup) ──────────────
+  // workflow_id → owning agent_id mapping. Read-only at runtime; the
+  // n8n-error-router watcher consults this on each inbound error to decide
+  // whether to queue the mission on the owning agent (if known) or on
+  // `meta` for triage (if unknown).
+  //
+  // Per the locked decision in agentic-os-integration-plan.md Slice 4: NO
+  // YAML mutation, NO git involvement. The `owns.n8n_workflows` field on
+  // agent.yaml exists from Slice 1 but is intentionally NOT consulted —
+  // this table is the single source of truth at runtime. Seeding happens
+  // via direct SQL (or a future dashboard UI; out of scope here).
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS n8n_workflow_owners (
+      workflow_id  TEXT    PRIMARY KEY,
+      agent_id     TEXT    NOT NULL,
+      created_at   INTEGER NOT NULL
+    );
+  `);
 }
 
 /** @internal - for tests only. Creates a fresh in-memory database. */
@@ -805,6 +824,22 @@ export function _initTestDatabase(): void {
   // Use a test encryption key for field-level encryption
   encryptionKey = crypto.randomBytes(32);
   db = new Database(':memory:');
+  db.pragma('journal_mode = WAL');
+  createSchema(db);
+  runMigrations(db);
+}
+
+/**
+ * @internal - for tests only. Initializes the shared db handle pointing
+ * at a real on-disk SQLite file. Used by Slice 4 tests that need to
+ * observe writes from code paths (like `runActions` → `queueMission` in
+ * watchers.ts) which open their own filesystem-backed connections via
+ * `STORE_DB_PATH`. Pass the same absolute path to the watcher code
+ * (process.env override) so every connection lands in the same file.
+ */
+export function _initTestDatabaseAtPath(filePath: string): void {
+  encryptionKey = crypto.randomBytes(32);
+  db = new Database(filePath);
   db.pragma('journal_mode = WAL');
   createSchema(db);
   runMigrations(db);
@@ -864,6 +899,55 @@ export function listWebhookPayloads(slug: string, limit = 20): WebhookPayloadRow
      ORDER BY id DESC
      LIMIT ?`,
   ).all(slug, limit) as WebhookPayloadRow[];
+}
+
+// ── Slice 4: n8n workflow ownership ─────────────────────────────────────
+//
+// Read-only lookup at runtime. Consulted by the watcher action `lookup-owner`
+// when an n8n error webhook fires. Returns the owning agent_id, or null if
+// the workflow_id has no registered owner (in which case the router queues
+// the mission on `meta` for triage and emits a Slack post).
+//
+// Seeding is intentionally manual / out-of-band:
+//   sqlite3 store/claudeclaw.db \
+//     "INSERT INTO n8n_workflow_owners (workflow_id, agent_id, created_at) \
+//      VALUES ('wf_lab_etl_42', 'goldbot-labs', strftime('%s','now'));"
+//
+// A future dashboard UI may offer one-click ownership assignment, but no
+// part of this slice writes to this table from a webhook payload — that
+// would be the YAML/git-mutation pattern the slice explicitly forbids.
+
+export interface N8nWorkflowOwnerRow {
+  workflow_id: string;
+  agent_id: string;
+  created_at: number;
+}
+
+export function lookupN8nWorkflowOwner(workflowId: string): string | null {
+  if (!workflowId) return null;
+  const row = db
+    .prepare('SELECT agent_id FROM n8n_workflow_owners WHERE workflow_id = ?')
+    .get(workflowId) as { agent_id?: string } | undefined;
+  return row?.agent_id ?? null;
+}
+
+export function upsertN8nWorkflowOwner(workflowId: string, agentId: string): void {
+  if (!workflowId || !agentId) throw new Error('workflowId and agentId required');
+  db.prepare(
+    `INSERT INTO n8n_workflow_owners (workflow_id, agent_id, created_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(workflow_id) DO UPDATE SET agent_id = excluded.agent_id`,
+  ).run(workflowId, agentId, Math.floor(Date.now() / 1000));
+}
+
+export function listN8nWorkflowOwners(): N8nWorkflowOwnerRow[] {
+  return db
+    .prepare('SELECT workflow_id, agent_id, created_at FROM n8n_workflow_owners ORDER BY workflow_id ASC')
+    .all() as N8nWorkflowOwnerRow[];
+}
+
+export function deleteN8nWorkflowOwner(workflowId: string): void {
+  db.prepare('DELETE FROM n8n_workflow_owners WHERE workflow_id = ?').run(workflowId);
 }
 
 export function getSession(chatId: string, agentId = 'main'): string | undefined {

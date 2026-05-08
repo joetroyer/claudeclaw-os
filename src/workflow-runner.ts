@@ -78,7 +78,7 @@ function recordMissionTaskForStage(
   runId: string,
 ): string {
   const id = newId();
-  createMissionTask(id, title, prompt, agentId, 'workflow', 5, 'workflow', runId);
+  createMissionTask(id, title, prompt, agentId, 'workflow', 5, false, false, 'workflow', runId);
   // Flip to running immediately. We do NOT use claimNextMissionTask
   // because that path is owned by src/scheduler.ts; we own these rows.
   // Direct UPDATE keeps this surgical.

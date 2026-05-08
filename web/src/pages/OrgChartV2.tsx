@@ -332,13 +332,13 @@ export function OrgChartV2() {
       defaultedRef.current = true;
       return;
     }
-    // Default expansion: every node up to depth 3 visible. Walks the
-    // tree once and sets all nodes whose own depth is ≤ 2 (since a
-    // node's "open" state means its children are visible — opening
-    // depth-2 nodes makes the depth-3 row of children show up).
+    // Default expansion: top 2 levels visible (depth 0 root + depth 1
+    // direct reports). Sub-skills collapsed so the tree fits cleanly
+    // in viewport without horizontal scroll. User clicks any depth-1
+    // card or uses the depth toolbar to expand further.
     const next = new Set<string>();
     function walk(n: TreeNode) {
-      if (n.depth <= 2) next.add(n.id);
+      if (n.depth <= 0) next.add(n.id);
       for (const c of n.children) walk(c);
     }
     for (const r of roots) walk(r);

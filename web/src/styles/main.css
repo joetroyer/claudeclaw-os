@@ -220,22 +220,22 @@ input, textarea, select {
 /* Slice 10 Wave 2 — Org Chart V2 tree connector rails.
    .org-chart-children is the container that holds a parent's children.
    It draws a vertical line on its left edge that runs the full height
-   of the children block.
+   of the children block (top → just above the last child's stub).
    .org-chart-child-rail wraps each individual child branch and draws a
-   horizontal stub that meets the vertical rail just above the child
-   card's avatar (≈28px from the top — the centerline of the 40px
-   avatar plus the card's top padding).
-   The last child trims its vertical-rail extension below the stub so
-   the line doesn't dangle past the final sibling. */
+   horizontal stub that meets the vertical rail at the avatar centerline
+   (~28px from the top — card top padding 12px + half of 40px avatar).
+   The last child trims the vertical rail's tail below its stub so the
+   tree shows a clean L-shape on the final sibling without JS.
+   Both rails use border-strong so the contrast reads on the dark bg. */
 .org-chart-children {
   position: relative;
 }
 .org-chart-children::before {
   content: '';
   position: absolute;
-  left: -14px;
+  left: -16px;
   top: 0;
-  bottom: 14px;
+  bottom: 0;
   width: 1px;
   background: var(--color-border-strong);
   pointer-events: none;
@@ -246,22 +246,20 @@ input, textarea, select {
 .org-chart-child-rail::before {
   content: '';
   position: absolute;
-  left: -14px;
-  top: 28px;
-  width: 14px;
+  left: -16px;
+  top: 32px;
+  width: 16px;
   height: 1px;
   background: var(--color-border-strong);
   pointer-events: none;
 }
 .org-chart-child-rail:last-child::after {
-  /* Mask the parent's vertical rail below this stub — gives a clean
-     L-shape on the last sibling without JS. */
   content: '';
   position: absolute;
-  left: -15px;
-  top: 29px;
-  bottom: -14px;
-  width: 2px;
+  left: -17px;
+  top: 33px;
+  bottom: 0;
+  width: 3px;
   background: var(--color-bg);
   pointer-events: none;
 }

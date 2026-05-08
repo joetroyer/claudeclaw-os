@@ -20,6 +20,7 @@ import { Chat } from '@/pages/Chat';
 import { WarRoom } from '@/pages/WarRoom';
 import { AgentFiles } from '@/pages/AgentFiles';
 import { OrgChart } from '@/pages/OrgChart';
+import { OrgChartV2 } from '@/pages/OrgChartV2';
 import { DEFAULT_ROUTE } from '@/lib/routes';
 
 export function App() {
@@ -55,6 +56,7 @@ export function App() {
           <Route path="/agents"><Agents /></Route>
           <Route path="/agents/:id/files"><AgentFiles /></Route>
           <Route path="/org-chart"><OrgChart /></Route>
+          <Route path="/org-chart-v2"><OrgChartV2 /></Route>
           <Route path="/chat"><Chat /></Route>
           <Route path="/memories"><Memories /></Route>
           <Route path="/hive"><HiveMind /></Route>

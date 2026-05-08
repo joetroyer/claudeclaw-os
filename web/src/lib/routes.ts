@@ -27,6 +27,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/triggered',  label: 'Triggered',       section: 'workspace',    icon: Webhook,       shortcut: 'g t' },
   { path: '/agents',     label: 'Agents',          section: 'workspace',    icon: Users,         shortcut: 'g a' },
   { path: '/org-chart',  label: 'Org Chart',       section: 'workspace',    icon: Workflow,      shortcut: 'g o' },
+  { path: '/org-chart-v2', label: 'Org Chart v2',  section: 'workspace',    icon: Workflow                       },
   { path: '/chat',       label: 'Chat',            section: 'workspace',    icon: MessageSquare, shortcut: 'g c' },
 
   { path: '/memories',   label: 'Memories',        section: 'intelligence', icon: Brain,         shortcut: 'g e' },

@@ -944,22 +944,30 @@ function NodeCard(p: CardProps) {
 
   const reportCount = p.node.children.length;
   const aiReportCount = p.node.children.filter((c) => c.type === 'ai').length;
+  const humanReportCount = reportCount - aiReportCount;
   const scheduled = p.node.scheduled_count || p.node.owns.scheduled_tasks.length || 0;
   const triggered = p.node.triggered_count || p.node.owns.triggered_tasks.length || 0;
 
   const isHuman = p.node.type === 'human';
   const primarySkills = p.node.skills?.primary ?? [];
   const visibleSkills = primarySkills.slice(0, 3);
-  const overflowSkills = primarySkills.length - visibleSkills.length;
+  // Slice 10 Wave 4 — Four-Rs preview. First responsibility line below
+  // the role gives the eye a glance of what this node actually does
+  // without opening the drawer. Truncated to ~50 chars to keep cards
+  // dense; the full list lives in the drawer.
+  const firstResp =
+    Array.isArray(p.node.four_rs?.responsibilities) && p.node.four_rs.responsibilities.length > 0
+      ? p.node.four_rs.responsibilities[0]
+      : '';
 
+  // Slice 10 Wave 4 — compact 240px card form factor. Targets ~5
+  // siblings per row at 1280px and a two-row card height. Mobile keeps
+  // a fluid full-width fallback under 400px so cards don't get clipped.
   return (
     <div
       class={[
-        'org-chart-card relative rounded-md border bg-[var(--color-card)] transition-all',
-        // Fixed compact width per Wave 2 spec — never stretches to fill
-        // the surrounding column. Mobile (<400px) gets a fluid w-full so
-        // the card still hits the viewport edges cleanly.
-        'w-full sm:w-[380px] sm:max-w-[380px]',
+        'org-chart-card relative rounded-lg border bg-[var(--color-card)] transition-all shadow-sm',
+        'w-[240px] max-w-[240px]',
         p.dimmed ? 'opacity-40' : 'opacity-100',
         p.highlighted ? 'ring-2 ring-[var(--color-accent)]' : '',
         'border-[var(--color-border)] hover:border-[var(--color-border-strong)]',
@@ -969,40 +977,23 @@ function NodeCard(p: CardProps) {
       data-node-type={p.node.type}
       data-node-lob={p.node.lob ?? ''}
     >
-      {/* ── header row: chevron · avatar · (name + role + chips + lob) · type badge · menu ── */}
-      <div class="flex items-start gap-2 px-3 pt-3 pb-2">
-        {p.hasChildren ? (
-          <button
-            type="button"
-            onClick={p.onToggle}
-            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center -ml-1 text-[var(--color-text-faint)] hover:text-[var(--color-text)] transition-colors shrink-0"
-            aria-expanded={p.isOpen}
-            aria-label={p.isOpen ? 'Collapse' : 'Expand'}
-            data-testid={`org-chart-v2-toggle-${p.node.id}`}
-          >
-            {p.isOpen
-              ? <ChevronDown size={14} />
-              : <ChevronRight size={14} />}
-          </button>
-        ) : (
-          <div class="w-3 shrink-0" />
-        )}
-
+      {/* ── header row: avatar · (name + role + first-resp + skills) · LOB pill · menu ── */}
+      <div class="flex items-start gap-2 px-2.5 pt-2.5 pb-1.5">
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); p.onAvatar(); }}
           class="shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center hover:opacity-90 transition-opacity"
           aria-label={`Open ${p.node.name} profile`}
         >
-          <AgentAvatar agentId={p.node.id} name={p.node.name} size={40} running={p.node.running ?? undefined} src={p.node.avatar || undefined} />
+          <AgentAvatar agentId={p.node.id} name={p.node.name} size={32} running={p.node.running ?? undefined} src={p.node.avatar || undefined} />
         </button>
 
         <div class="flex-1 min-w-0">
-          <div class="flex items-start gap-2">
+          <div class="flex items-center gap-1">
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); p.onTitle(); }}
-              class="flex-1 min-w-0 min-h-[44px] inline-flex items-center text-[14px] font-semibold text-[var(--color-text)] hover:text-[var(--color-accent)] transition-colors text-left truncate"
+              class="flex-1 min-w-0 min-h-[44px] inline-flex items-center text-[13px] font-semibold leading-tight text-[var(--color-text)] hover:text-[var(--color-accent)] transition-colors text-left truncate"
               data-testid={`org-chart-v2-title-${p.node.id}`}
               title={p.node.name}
             >
@@ -1014,81 +1005,80 @@ function NodeCard(p: CardProps) {
               data-testid={`org-chart-v2-badge-${p.node.id}`}
               aria-label={`Filter to ${p.node.type}`}
               title={`Filter to ${isHuman ? 'humans' : 'AI'}`}
-              class="shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-2 rounded hover:bg-[var(--color-elevated)] transition-colors group"
+              class="shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded hover:bg-[var(--color-elevated)] transition-colors"
             >
-              <Pill tone={isHuman ? 'neutral' : 'accent'}>
-                <span class="inline-flex items-center gap-1">
-                  {isHuman ? <User size={9} /> : <Bot size={9} />}
-                  {isHuman ? 'Human' : 'AI'}
-                  <Filter
-                    size={8}
-                    class="opacity-0 group-hover:opacity-60 transition-opacity"
-                  />
-                </span>
-              </Pill>
+              {isHuman
+                ? <User size={11} class="text-[var(--color-text-faint)]" />
+                : <Bot size={11} class="text-[var(--color-accent)]" />}
             </button>
           </div>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); p.onSubtitle(); }}
-            class="block w-full min-h-[44px] text-[12px] leading-snug text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors text-left line-clamp-2 py-1"
+            class="block w-full min-h-[44px] text-[11px] leading-snug text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors text-left truncate"
             data-testid={`org-chart-v2-subtitle-${p.node.id}`}
+            title={p.node.role || 'no role set'}
           >
             {p.node.role || 'no role set'}
           </button>
 
-          {/* skill chips — max 3 visible, "+N" affordance */}
+          {/* Slice 10 Wave 4 — first responsibility preview line. Hidden
+              when the responsibilities array is empty so the card stays
+              compact. Truncated visually; full text in the drawer. */}
+          {firstResp && (
+            <div
+              class="mt-0.5 text-[10px] leading-snug text-[var(--color-text-faint)] truncate"
+              data-testid={`org-chart-v2-resp-${p.node.id}`}
+              title={firstResp}
+            >
+              {firstResp}
+            </div>
+          )}
+
+          {/* skill chips — max 3 visible, no overflow chip on collapsed
+              card per Wave 4 spec. The drawer lists every skill. */}
           {visibleSkills.length > 0 && (
             <div
-              class="mt-1.5 flex flex-wrap gap-1"
+              class="mt-1 flex flex-wrap gap-0.5"
               data-testid={`org-chart-v2-skills-${p.node.id}`}
             >
               {visibleSkills.map((s) => (
                 <span
                   key={s}
-                  class="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] border border-[var(--color-border)]"
+                  class="inline-flex items-center px-1 py-px text-[9px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] border border-[var(--color-border)]"
                   title={s}
                 >
                   {s}
                 </span>
               ))}
-              {overflowSkills > 0 && (
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); p.onSubtitle(); }}
-                  class="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded bg-[var(--color-elevated)] text-[var(--color-text-faint)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
-                  aria-label={`${overflowSkills} more skill${overflowSkills === 1 ? '' : 's'}`}
-                  data-testid={`org-chart-v2-skills-more-${p.node.id}`}
-                >
-                  +{overflowSkills}
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* lob tag — small, low-emphasis under the chips */}
-          {p.node.lob && (
-            <div
-              class="mt-1 flex items-center gap-1 text-[10px]"
-              data-testid={`org-chart-v2-lob-${p.node.id}`}
-            >
-              <span class="uppercase tracking-wider text-[var(--color-text-faint)]">lob</span>
-              <span class="text-[var(--color-text-muted)]">{p.node.lob}</span>
             </div>
           )}
         </div>
 
-        <div class="relative shrink-0 -mr-1" ref={menuRef}>
+        {/* LOB pill on top-right (replaces the verbose "lob: agency"
+            wording from Wave 2). Same colour as the rest of the chip
+            row but slightly accented to signal LOB membership. */}
+        {p.node.lob && (
+          <span
+            class="shrink-0 inline-flex items-center px-1.5 py-px text-[9px] rounded uppercase tracking-wider bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+            data-testid={`org-chart-v2-lob-${p.node.id}`}
+            title={`LOB: ${p.node.lob}`}
+          >
+            {p.node.lob}
+          </span>
+        )}
+
+        <div class="relative shrink-0 -mr-1 -mt-1" ref={menuRef}>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}
-            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-full bg-[var(--color-elevated)] text-[var(--color-text-faint)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
+            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-full text-[var(--color-text-faint)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
             aria-label="Card actions"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             data-testid={`org-chart-v2-menu-${p.node.id}`}
           >
-            <MoreHorizontal size={14} />
+            <MoreHorizontal size={12} />
           </button>
           {menuOpen && (
             <div
@@ -1127,66 +1117,69 @@ function NodeCard(p: CardProps) {
         </div>
       </div>
 
-      {/* ── footer: nav-counts on row 1, cadence + menu hint on row 2 ── */}
-      <div class="border-t border-[var(--color-border)] px-3 py-1.5 text-[11px] text-[var(--color-text-faint)] space-y-0.5">
-        {(reportCount > 0 || aiReportCount > 0) && (
-          <div class="flex flex-wrap items-center gap-x-3">
-            {reportCount > 0 && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!p.isOpen) p.onToggle();
-                }}
-                class="cursor-pointer min-h-[28px] inline-flex items-center gap-1 hover:text-[var(--color-accent)] transition-colors group"
-                data-testid={`org-chart-v2-reports-${p.node.id}`}
-                aria-label={`Show ${reportCount} report${reportCount === 1 ? '' : 's'}`}
-              >
-                {p.isOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-                <span>{reportCount} report{reportCount === 1 ? '' : 's'}</span>
-              </button>
-            )}
-            {aiReportCount > 0 && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!p.isOpen) p.onToggle();
-                }}
-                class="cursor-pointer min-h-[28px] inline-flex items-center gap-1 hover:text-[var(--color-accent)] transition-colors"
-                data-testid={`org-chart-v2-ai-reports-${p.node.id}`}
-                aria-label={`Show ${aiReportCount} AI employee${aiReportCount === 1 ? '' : 's'}`}
-              >
-                <Bot size={10} />
-                <span>{aiReportCount} AI Emp</span>
-              </button>
-            )}
-          </div>
-        )}
-        <div class="flex flex-wrap items-center gap-x-3">
+      {/* ── footer: counts + cadence — interactive buttons are 44×44
+          to satisfy the Wave 1 touch-target contract; the visible
+          dot+number is tight inside the larger hit-area. ── */}
+      <div class="border-t border-[var(--color-border)] px-1 text-[10px] text-[var(--color-text-faint)] flex items-center justify-between flex-wrap gap-x-1">
+        <div class="flex items-center">
+          {p.hasChildren && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); p.onToggle(); }}
+              class="cursor-pointer min-h-[44px] min-w-[44px] inline-flex items-center justify-center gap-0.5 hover:text-[var(--color-accent)] transition-colors"
+              data-testid={`org-chart-v2-toggle-${p.node.id}`}
+              aria-expanded={p.isOpen}
+              aria-label={p.isOpen ? 'Collapse children' : 'Expand children'}
+            >
+              {p.isOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              <span class="font-medium">{reportCount}</span>
+            </button>
+          )}
+          {humanReportCount > 0 && (
+            <span
+              class="inline-flex items-center justify-center gap-0.5 min-h-[44px] min-w-[28px] px-1"
+              data-testid={`org-chart-v2-reports-${p.node.id}`}
+              aria-label={`${humanReportCount} human report${humanReportCount === 1 ? '' : 's'}`}
+              title={`${humanReportCount} human report${humanReportCount === 1 ? '' : 's'}`}
+            >
+              <User size={9} />
+              <span>{humanReportCount}</span>
+            </span>
+          )}
+          {aiReportCount > 0 && (
+            <span
+              class="inline-flex items-center justify-center gap-0.5 min-h-[44px] min-w-[28px] px-1"
+              data-testid={`org-chart-v2-ai-reports-${p.node.id}`}
+              aria-label={`${aiReportCount} AI employee${aiReportCount === 1 ? '' : 's'}`}
+              title={`${aiReportCount} AI employee${aiReportCount === 1 ? '' : 's'}`}
+            >
+              <Bot size={9} />
+              <span>{aiReportCount}</span>
+            </span>
+          )}
+        </div>
+        <div class="flex items-center">
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); p.onScheduled(); }}
-            class="cursor-pointer min-h-[28px] inline-flex items-center gap-1 hover:text-[var(--color-accent)] transition-colors group"
+            class="cursor-pointer min-h-[44px] min-w-[44px] inline-flex items-center justify-center gap-0.5 hover:text-[var(--color-accent)] transition-colors"
             data-testid={`org-chart-v2-scheduled-${p.node.id}`}
             aria-label={`Open ${scheduled} scheduled task${scheduled === 1 ? '' : 's'}`}
-            title="View scheduled tasks"
+            title={`${scheduled} scheduled task${scheduled === 1 ? '' : 's'}`}
           >
-            <Calendar size={10} />
-            <span>{scheduled} sched</span>
-            <span class="opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true">→</span>
+            <Calendar size={9} />
+            <span>{scheduled}</span>
           </button>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); p.onTriggered(); }}
-            class="cursor-pointer min-h-[28px] inline-flex items-center gap-1 hover:text-[var(--color-accent)] transition-colors group"
+            class="cursor-pointer min-h-[44px] min-w-[44px] inline-flex items-center justify-center gap-0.5 hover:text-[var(--color-accent)] transition-colors"
             data-testid={`org-chart-v2-triggered-${p.node.id}`}
             aria-label={`Open ${triggered} triggered task${triggered === 1 ? '' : 's'}`}
-            title="View triggered tasks"
+            title={`${triggered} triggered task${triggered === 1 ? '' : 's'}`}
           >
-            <Zap size={10} />
-            <span>{triggered} trig</span>
-            <span class="opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true">→</span>
+            <Zap size={9} />
+            <span>{triggered}</span>
           </button>
         </div>
       </div>

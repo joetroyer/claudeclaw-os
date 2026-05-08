@@ -2,31 +2,32 @@
 //
 // Source table:    public.signals          (live broker dispatch pipeline)
 // clawos watcher:  trading-monitor          (slug: trading-monitor)
-// Behaviour:       Forward INSERT + status-flip events; default priority
-//                  `medium`; agent may escalate to `high` based on
-//                  `lab-query-channel-credibility` skill.
+// Behaviour:       Forward INSERT + status-flip events as MINIMAL payloads.
+//                  The agent fetches fresh row data from Supabase when it
+//                  processes the mission task — so it always sees the
+//                  latest status, not the snapshot at trigger time.
 // Secret env:      TRADING_MONITOR_SECRET   (clawos .env + supabase secrets)
 //
-// Why this bridge exists separately from clawos-ingest-bridge:
-//   public.signals → ceddi only (live broker dispatch). Mistakes here
-//   trigger Telegram pings + on-call attention. Different priority defaults
-//   and probably different agent prompt template than the ingest_only path.
-//   See ../README.md for the "one-bridge-per-table" rationale.
+// Why minimal payload (signal_id only, not field snapshot):
+//   1. Live signals evolve. status flips filling → active → complete with
+//      possibly several intermediate UPDATEs. By the time the agent runs,
+//      the row may have moved on. Lookup-on-process gives fresh data.
+//   2. Smaller wire payload, less chance of HMAC body-mismatch issues.
+//   3. Agent reasoning isn't pinned to a stale snapshot stored in
+//      mission_tasks.prompt forever.
+//
+// Trade-off: the agent must reach Supabase. Service-role key + PostgREST
+// path is the recipe; analysis schema is now exposed.
 //
 // Deploy:
-//   supabase functions deploy clawos-ceddi-bridge
+//   supabase functions deploy clawos-ceddi-bridge --no-verify-jwt
 //   supabase secrets set TRADING_MONITOR_SECRET=<value-from-clawos-.env>
 //
 // Wire (Supabase dashboard → Database → Webhooks):
 //   - Table:  public.signals
 //   - Events: ☑ Insert  ☑ Update     (skip Delete)
 //   - Type:   Supabase Edge Functions
-//   - Edge Function: clawos-ceddi-bridge
-//
-// Tuning what fires:
-//   - The default forwards every INSERT and every UPDATE. To narrow, edit
-//     `shouldForward()` below — e.g. only forward UPDATEs whose status
-//     transitioned to `active` or `complete`.
+//   - Function: clawos-ceddi-bridge
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
 
@@ -36,66 +37,12 @@ const CLAWOS_WEBHOOK_URL =
 
 const SECRET = Deno.env.get('TRADING_MONITOR_SECRET') || '';
 
-interface SignalRecord {
-  signal_id?: string;
-  signal_type?: string;
-  status?: string;
-  direction?: string;
-  entry_price?: number | string | null;
-  intended_lots?: number | string | null;
-  filled_lots?: number | string | null;
-  signal_sl_price?: number | string | null;
-  emergency_sl_price?: number | string | null;
-  tp_levels?: Array<number | string> | null;
-  tps_hit?: number[] | null;
-  exit_reason?: string | null;
-  final_pnl?: number | string | null;
-  source_channel_kind?: string | null;
-  trigger_message_id?: number | null;
-  created_at?: string;
-}
-
 interface SupabaseDbWebhookEvent {
   type: 'INSERT' | 'UPDATE' | 'DELETE';
   table: string;
   schema?: string;
-  record?: SignalRecord;
-  old_record?: SignalRecord;
-}
-
-function shouldForward(event: SupabaseDbWebhookEvent): { ok: true } | { ok: false; reason: string } {
-  if (event.type === 'DELETE') return { ok: false, reason: 'DELETE event' };
-  if (!event.record) return { ok: false, reason: 'no record' };
-
-  // The signals table only accepts ceddi today (other live channels would
-  // need their own kind here). Reject anything we weren't expecting.
-  const kind = event.record.source_channel_kind;
-  if (kind && kind !== 'ceddi' && kind !== 'unknown') {
-    return { ok: false, reason: `source_channel_kind=${kind} not handled by ceddi-bridge` };
-  }
-
-  return { ok: true };
-}
-
-function mapRecord(event: SupabaseDbWebhookEvent): Record<string, unknown> {
-  const r = event.record!;
-  return {
-    bridge: 'clawos-ceddi-bridge',
-    db_event: event.type,
-    signal_id: r.signal_id ?? null,
-    provider: r.source_channel_kind || 'ceddi',
-    instrument: 'XAUUSD',
-    side: r.direction === 'sell' ? 'sell' : r.direction === 'buy' ? 'buy' : 'unknown',
-    entry: r.entry_price !== null && r.entry_price !== undefined ? Number(r.entry_price) : null,
-    sl: r.signal_sl_price !== null && r.signal_sl_price !== undefined ? Number(r.signal_sl_price) : null,
-    tp: Array.isArray(r.tp_levels) ? r.tp_levels.map((v) => Number(v)) : [],
-    tps_hit: Array.isArray(r.tps_hit) ? r.tps_hit : [],
-    signal_type: r.signal_type ?? null,
-    status: r.status ?? null,
-    exit_reason: r.exit_reason ?? null,
-    final_pnl: r.final_pnl !== null && r.final_pnl !== undefined ? Number(r.final_pnl) : null,
-    raw: `signals.${event.type} signal_id=${r.signal_id} status=${r.status ?? '?'} ${r.direction ?? '?'} entry=${r.entry_price ?? '?'} sl=${r.signal_sl_price ?? '?'}`,
-  };
+  record?: Record<string, unknown>;
+  old_record?: Record<string, unknown>;
 }
 
 async function hmacSha256Hex(key: string, body: string): Promise<string> {
@@ -132,15 +79,49 @@ serve(async (req) => {
     });
   }
 
-  const gate = shouldForward(event);
-  if (!gate.ok) {
-    return new Response(JSON.stringify({ ok: true, skipped: gate.reason }), {
+  if (event.type === 'DELETE') {
+    return new Response(JSON.stringify({ ok: true, skipped: 'DELETE event' }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
     });
   }
 
-  const payload = mapRecord(event);
+  const r = event.record;
+  if (!r) {
+    return new Response(JSON.stringify({ ok: true, skipped: 'no record' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  const signal_id = r.signal_id as string | undefined;
+  if (!signal_id) {
+    return new Response(JSON.stringify({ ok: true, skipped: 'no signal_id on record' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  // Reject non-ceddi rows (this bridge is for the live ceddi pipeline).
+  const kind = r.source_channel_kind as string | null | undefined;
+  if (kind && kind !== 'ceddi' && kind !== 'unknown') {
+    return new Response(
+      JSON.stringify({ ok: true, skipped: `source_channel_kind=${kind} not handled by ceddi-bridge` }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  }
+
+  // Minimal payload — agent fetches fresh data from Supabase.
+  const payload = {
+    bridge: 'clawos-ceddi-bridge',
+    schema: event.schema || 'public',
+    table: event.table || 'signals',
+    db_event: event.type,
+    signal_id,
+    // status snapshot for log titles only — agent doesn't trust this; it queries.
+    status_at_trigger: (r.status as string | undefined) ?? null,
+  };
+
   const body = JSON.stringify(payload);
   const sig = await hmacSha256Hex(SECRET, body);
 
@@ -170,7 +151,7 @@ serve(async (req) => {
       ok: upstreamStatus !== null && upstreamStatus < 400,
       upstream_status: upstreamStatus,
       upstream_body: upstreamBody,
-      forwarded_signal_id: event.record?.signal_id ?? null,
+      forwarded_signal_id: signal_id,
     }),
     { status: 200, headers: { 'content-type': 'application/json' } },
   );

@@ -90,6 +90,7 @@ watchers:
   # Live broker pipeline (public.signals → ceddi-only).
   # Bridge: supabase/functions/clawos-ceddi-bridge/.
   # Stance: HIGH-attention. Agent may escalate to Telegram ping.
+  # Payload is MINIMAL — agent fetches fresh row data via PostgREST.
   - name: trading-monitor-trigger
     type: webhook
     slug: trading-monitor
@@ -98,41 +99,53 @@ watchers:
     actions:
       - queue-mission:
           agent: trading-monitor
-          title: "Live signal: {payload.provider} {payload.side} {payload.entry}"
+          title: "Live ceddi signal: {payload.signal_id} ({payload.status_at_trigger})"
           prompt: |
-            LIVE signal from the broker dispatch pipeline (public.signals).
-            Source = ceddi (the only kind that writes here).
+            LIVE signal event on {payload.schema}.{payload.table}.
+            db_event: {payload.db_event}   signal_id: {payload.signal_id}
 
-            ── Payload ──────────────────────────────────────────
-            {payload_raw}
-            ─────────────────────────────────────────────────────
+            ── Step 1: fetch FRESH row from Supabase ─────────────
+            Read goldbot creds:
+              SUPABASE_URL=$(grep ^SUPABASE_URL= /Volumes/4TB-990/dev/files/.env | cut -d= -f2-)
+              SR=$(grep ^SUPABASE_SERVICE_ROLE_KEY= /Volumes/4TB-990/dev/files/.env | cut -d= -f2-)
 
-            Your job (per your CLAUDE.md):
+            Then:
+              curl -s "$SUPABASE_URL/rest/v1/signals?signal_id=eq.{payload.signal_id}&select=*" \
+                -H "apikey: $SR" -H "Authorization: Bearer $SR"
 
-            1. Parse: provider, side, instrument, entry, sl, tp[], status, signal_type.
-            2. Enrich (use the skills you have — judgment on which to call):
-               - lab-query-channel-credibility — does this provider's recent SL/TP
-                 accuracy justify high-priority treatment?
-               - lab-query-signal-performance  — provider's recent win rate / TP-hit rate.
-               - lab-query-drawdown-profile    — only if signal looks like it
-                 follows a streak.
-            3. Classify priority:
-               - high  → conviction signal from a credible provider (>70% credibility,
-                         clean entry, sane SL/TP). Telegram-notify Joe.
-               - medium → normal signal. Log only.
-               - low   → degenerate fields (missing SL, parser warnings, low-cred provider).
-            4. Log one structured row to hive_mind:
-               - action  = signal-received
-               - summary = "PROVIDER=… SIDE=… INST=… ENTRY=… SL=… TP=… PRIORITY=…"
-               - chat_id = 'system'
-            5. Reply with the tight bullet output described in your CLAUDE.md.
+            (No Accept-Profile needed — public schema is default.)
 
-            Hard rules: never trade, never send orders, never DM the source channel.
+            Parse the returned row. The status may have changed since the
+            trigger fired — trust the FETCHED status, not status_at_trigger.
+
+            ── Step 2: enrich ────────────────────────────────────
+            Use whichever lab skills the situation warrants:
+              - lab-query-channel-credibility — does this provider's recent
+                SL/TP accuracy justify a high-priority treatment?
+              - lab-query-signal-performance  — provider win rate / TP-hit rate.
+              - lab-query-drawdown-profile    — only if it follows a streak.
+
+            ── Step 3: classify priority ────────────────────────
+              - high   → strong conviction + credible provider (>70%) + clean
+                          entry/SL/TP. Telegram-notify Joe.
+              - medium → normal signal. Log only.
+              - low    → degenerate fields, low credibility. Log only.
+
+            ── Step 4: log to hive_mind ─────────────────────────
+              action  = signal-received
+              summary = "PROVIDER=… SIDE=… INST=… ENTRY=… SL=… TP=… STATUS=… PRIORITY=…"
+              chat_id = 'system'
+
+            ── Step 5: reply ────────────────────────────────────
+            Tight bullets per your CLAUDE.md.
+
+            Hard rules: never trade, never send orders, never DM source channel.
 
   # Observation-only L1 ingest (analysis.signals_l1).
   # Currently 4 providers: ceddi (shadow), gold_scalping, goldsignals_swing,
   # goldsignals_intraday. Bridge: supabase/functions/clawos-ingest-bridge/.
   # Stance: SILENT. Log only. Never escalate to Telegram from this path.
+  # Payload is MINIMAL — agent fetches fresh row via analysis-schema PostgREST.
   - name: trading-monitor-ingest
     type: webhook
     slug: trading-monitor-ingest
@@ -141,30 +154,37 @@ watchers:
     actions:
       - queue-mission:
           agent: trading-monitor
-          title: "Ingest: {payload.provider} {payload.side} {payload.entry}"
+          title: "Ingest: {payload.provider} ({payload.signal_id})"
           prompt: |
-            OBSERVATION-ONLY ingest signal from analysis.signals_l1.
-            Source = one of: gold_scalping | goldsignals_swing | goldsignals_intraday | ceddi (shadow row).
+            OBSERVATION-ONLY signal on {payload.schema}.{payload.table}.
+            provider: {payload.provider}   signal_id: {payload.signal_id}
 
-            ── Payload ──────────────────────────────────────────
-            {payload_raw}
-            ─────────────────────────────────────────────────────
+            ── Step 1: fetch fresh row from Supabase ─────────────
+            Read goldbot creds:
+              SUPABASE_URL=$(grep ^SUPABASE_URL= /Volumes/4TB-990/dev/files/.env | cut -d= -f2-)
+              SR=$(grep ^SUPABASE_SERVICE_ROLE_KEY= /Volumes/4TB-990/dev/files/.env | cut -d= -f2-)
 
-            Your job (per your CLAUDE.md):
+            Then (analysis schema requires Accept-Profile header):
+              curl -s "$SUPABASE_URL/rest/v1/signals_l1?signal_id=eq.{payload.signal_id}&select=*" \
+                -H "apikey: $SR" -H "Authorization: Bearer $SR" \
+                -H "Accept-Profile: analysis"
 
-            1. Parse the L1 fields (provider, side, entry_low/high/mid, sl, tp_levels,
-               is_buy_now, is_split_message, parser_warnings, raw_text).
-            2. Log one structured row to hive_mind:
-               - action  = ingest-signal
-               - summary = "PROVIDER=… SIDE=… ENTRY=… SL=… TP=… BUY_NOW=… WARN=…"
-               - chat_id = 'system'
-            3. Reply with a single-line summary. Don't run lab-query skills unless
-               something looks broken (parser_warnings non-empty, missing SL, etc.) —
-               we're aggregating these into a daily/weekly view, not reacting per signal.
+            Parse: provider, direction, entry_low/high/mid, sl, tp_levels,
+            is_buy_now, is_split_message, parser_warnings, raw_text, posted_at.
 
-            Hard rules: NEVER notify Joe via Telegram from this path. NEVER trade.
-            NEVER send orders. NEVER DM the source channel. Pure observation, log
-            structured, move on.
+            ── Step 2: log to hive_mind ─────────────────────────
+              action  = ingest-signal
+              summary = "PROVIDER=… SIDE=… ENTRY=… SL=… TP=… BUY_NOW=… WARN=…"
+              chat_id = 'system'
+
+            ── Step 3: reply ────────────────────────────────────
+            Single-line summary. Don't run lab-query skills unless something
+            looks broken (parser_warnings non-empty, missing SL, weird entry
+            range). Aggregating these into daily/weekly views — not reacting
+            per signal.
+
+            Hard rules: NEVER Telegram-ping Joe. NEVER trade. NEVER send orders.
+            NEVER DM source channel. Pure observation, log structured, move on.
 
   - name: n8n-error-router
     type: webhook

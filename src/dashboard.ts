@@ -130,6 +130,9 @@ import {
   loadWebhookWatcher,
   listWebhookWatchers,
   runActions as runWatcherActions,
+  createWebhookWatcher,
+  updateWebhookWatcher,
+  deleteWebhookWatcher,
 } from './watchers.js';
 import { getIngestionQuotaStatus, extractViaClaude } from './memory-ingest.js';
 import { WARROOM_ENABLED, WARROOM_PORT } from './config.js';
@@ -1834,6 +1837,69 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     });
 
     return c.json({ ok: true, mode: 'test', payload_id: payloadId, queued_mission_tasks: queuedIds });
+  });
+
+  // ── Slice 8: Webhook watcher CRUD ────────────────────────────────────
+  //
+  // Create / edit / delete webhook entries in watchers.yaml. Limited to
+  // type=webhook intentionally — log-tail and sqlite-poll watchers are
+  // operator-managed (they reference paths and SQL that need code review).
+  //
+  // After mutation, no bot restart is needed: loadWebhookWatcher() and
+  // listWebhookWatchers() re-read watchers.yaml on every call.
+  app.post('/api/watchers', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as {
+      type?: string;
+      name?: string;
+      slug?: string;
+      secret_env?: string;
+      mode?: 'test' | 'preview' | 'run';
+      actions?: unknown[];
+    };
+    if (body.type && body.type !== 'webhook') {
+      return c.json({ ok: false, error: `cannot create ${body.type} via API; only webhook is supported` }, 400);
+    }
+    const result = createWebhookWatcher({
+      name: body.name || '',
+      slug: body.slug || '',
+      secret_env: body.secret_env || '',
+      mode: body.mode,
+      actions: (body.actions || []) as any[],
+    });
+    if (!result.ok) return c.json({ ok: false, error: result.error }, result.status as 400 | 404 | 409);
+    insertAuditLog('main', 'dashboard', 'webhook_watcher_created',
+      `slug=${result.watcher.slug} name="${result.watcher.name}" mode=${result.watcher.mode}`, false);
+    return c.json({ ok: true, watcher: result.watcher });
+  });
+
+  app.put('/api/watchers/:slug', async (c) => {
+    const slug = c.req.param('slug');
+    const body = await c.req.json().catch(() => ({})) as {
+      name?: string;
+      secret_env?: string;
+      mode?: 'test' | 'preview' | 'run';
+      actions?: unknown[];
+    };
+    const result = updateWebhookWatcher(slug, {
+      name: body.name,
+      secret_env: body.secret_env,
+      mode: body.mode,
+      actions: body.actions as any[] | undefined,
+      slug, // not used (immutable) but satisfies the type
+    });
+    if (!result.ok) return c.json({ ok: false, error: result.error }, result.status as 400 | 404 | 409);
+    insertAuditLog('main', 'dashboard', 'webhook_watcher_updated',
+      `slug=${slug} name="${result.watcher.name}" mode=${result.watcher.mode}`, false);
+    return c.json({ ok: true, watcher: result.watcher });
+  });
+
+  app.delete('/api/watchers/:slug', (c) => {
+    const slug = c.req.param('slug');
+    const result = deleteWebhookWatcher(slug);
+    if (!result.ok) return c.json({ ok: false, error: result.error }, result.status as 400 | 404 | 409);
+    insertAuditLog('main', 'dashboard', 'webhook_watcher_deleted',
+      `slug=${slug}`, false);
+    return c.json({ ok: true });
   });
 
   // ── Mission Control endpoints ────────────────────────────────────────

@@ -302,14 +302,14 @@ export function OrgChartV2() {
   const nodes = data?.nodes ?? [];
   const { roots, byId } = useMemo(() => buildTree(nodes), [nodes]);
 
-  // Load initial state from URL + localStorage. URL wins on conflict so
-  // shared links land you on the right view regardless of stored state.
+  // Load initial state from URL only. localStorage was confusing — clicking
+  // the sidebar nav to /org-chart-v2 (no ?expand=) should give a fresh default
+  // every time, not stale state from last session. F5 still preserves user's
+  // current view via the URL itself.
   const initial = useMemo(() => readUrlState(), []);
   const [focusId, setFocusId] = useState<string | null>(initial.focus);
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     if (initial.expand && initial.expand.length > 0) return new Set(initial.expand);
-    const stored = loadExpansion();
-    if (stored.size > 0) return stored;
     // Default: top 2 levels expanded — i.e. root nodes are "open".
     return new Set();
   });
@@ -327,11 +327,12 @@ export function OrgChartV2() {
       defaultedRef.current = true;
       return;
     }
-    const stored = loadExpansion();
-    if (stored.size > 0) {
-      defaultedRef.current = true;
-      return;
-    }
+    // Intentionally NOT falling back to loadExpansion() — clicking the
+    // sidebar nav to /org-chart-v2 (no ?expand=) should give a fresh
+    // depth-2 default every time, not the stale state from last session.
+    // localStorage is still written during user interaction below; a
+    // shared URL with ?expand=... overrides default. Soft-reload via
+    // sidebar nav = clean slate.
     // Default expansion: top 2 levels visible (depth 0 root + depth 1
     // direct reports). Sub-skills collapsed so the tree fits cleanly
     // in viewport without horizontal scroll. User clicks any depth-1
@@ -346,10 +347,9 @@ export function OrgChartV2() {
     defaultedRef.current = true;
   }, [roots]);
 
-  // Persist expansion to localStorage.
-  useEffect(() => {
-    saveExpansion(expanded);
-  }, [expanded]);
+  // Expansion is mirrored to URL only — no localStorage. Sidebar nav
+  // (no ?expand=) ⇒ fresh default; refresh ⇒ URL preserves; share link
+  // ⇒ recipient lands on the same view.
 
   // Persist URL state on focus / expand changes. Search and filter chips
   // are intentionally NOT mirrored to URL — they're transient view

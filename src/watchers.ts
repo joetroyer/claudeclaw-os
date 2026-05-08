@@ -514,6 +514,158 @@ export function listWebhookWatchers(): WebhookWatcherCfg[] {
   }
 }
 
+// ── Slice 8: Webhook watcher CRUD via dashboard ───────────────────────────────
+//
+// These helpers parse watchers.yaml, mutate the in-memory list, and write
+// the file back. js-yaml's dump preserves data structure (key order in
+// recent versions stays stable) but does NOT preserve comments or the
+// original whitespace layout. That's an explicit known trade-off: the
+// runtime semantics are unchanged, but operators editing watchers.yaml
+// directly should re-add their comments after a UI-driven edit.
+//
+// `loadWebhookWatcher` re-reads the file on every webhook request, so
+// these mutations take effect immediately — no bot restart required.
+
+const WATCHERS_YAML_PATH = (): string => path.join(PROJECT_ROOT, 'watchers.yaml');
+
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+function readWatchersYaml(): WatchersFile {
+  const cfgPath = WATCHERS_YAML_PATH();
+  if (!fs.existsSync(cfgPath)) return { watchers: [] };
+  const parsed = yaml.load(fs.readFileSync(cfgPath, 'utf-8')) as WatchersFile;
+  if (!parsed || !Array.isArray(parsed.watchers)) return { watchers: [] };
+  return parsed;
+}
+
+function writeWatchersYaml(file: WatchersFile): void {
+  const cfgPath = WATCHERS_YAML_PATH();
+  // lineWidth: -1 keeps long strings on one line; noRefs avoids `&anchor`
+  // refs that would surprise human editors.
+  const out = yaml.dump(file, { lineWidth: -1, noRefs: true });
+  fs.writeFileSync(cfgPath, out);
+}
+
+export interface WebhookWatcherInput {
+  name: string;
+  slug: string;
+  secret_env: string;
+  mode?: 'test' | 'preview' | 'run';
+  actions: Action[];
+}
+
+export type WatcherCrudResult =
+  | { ok: true; watcher: WebhookWatcherCfg }
+  | { ok: false; error: string; status: number };
+
+function validateWebhookInput(input: Partial<WebhookWatcherInput>, opts: { allowMissingSlug?: boolean } = {}): string | null {
+  if (!input.name || typeof input.name !== 'string' || !input.name.trim()) {
+    return 'name required';
+  }
+  if (!opts.allowMissingSlug) {
+    if (!input.slug || typeof input.slug !== 'string') return 'slug required';
+    if (!SLUG_RE.test(input.slug)) {
+      return 'slug must be lowercase a-z, 0-9, dash; 1-64 chars';
+    }
+  }
+  if (!input.secret_env || typeof input.secret_env !== 'string' || !input.secret_env.trim()) {
+    return 'secret_env required';
+  }
+  if (!/^[A-Z][A-Z0-9_]*$/.test(input.secret_env)) {
+    return 'secret_env must look like an env var (uppercase, underscores)';
+  }
+  if (input.mode && !['test', 'preview', 'run'].includes(input.mode)) {
+    return 'mode must be test, preview, or run';
+  }
+  if (!Array.isArray(input.actions) || input.actions.length === 0) {
+    return 'actions required (at least one)';
+  }
+  return null;
+}
+
+export function createWebhookWatcher(input: WebhookWatcherInput): WatcherCrudResult {
+  const err = validateWebhookInput(input);
+  if (err) return { ok: false, error: err, status: 400 };
+
+  const file = readWatchersYaml();
+  // Slug uniqueness across ALL watcher types — slugs only mean something
+  // for webhook watchers, but a name collision with a non-webhook entry
+  // (which YAMLs can technically have via their `slug:` if any future
+  // type adopts one) would still confuse the URL space.
+  for (const w of file.watchers) {
+    if (w.type === 'webhook' && w.slug === input.slug) {
+      return { ok: false, error: `slug already exists: ${input.slug}`, status: 409 };
+    }
+    if (w.name === input.name) {
+      return { ok: false, error: `name already exists: ${input.name}`, status: 409 };
+    }
+  }
+
+  const watcher: WebhookWatcherCfg = {
+    name: input.name.trim(),
+    type: 'webhook',
+    slug: input.slug,
+    secret_env: input.secret_env.trim(),
+    mode: input.mode || 'test',
+    actions: input.actions,
+  };
+  file.watchers.push(watcher);
+  writeWatchersYaml(file);
+  return { ok: true, watcher };
+}
+
+export function updateWebhookWatcher(slug: string, input: Partial<WebhookWatcherInput>): WatcherCrudResult {
+  if (!SLUG_RE.test(slug)) return { ok: false, error: 'invalid slug', status: 400 };
+  const err = validateWebhookInput(input, { allowMissingSlug: true });
+  if (err) return { ok: false, error: err, status: 400 };
+
+  const file = readWatchersYaml();
+  const idx = file.watchers.findIndex((w) => w.type === 'webhook' && w.slug === slug);
+  if (idx < 0) return { ok: false, error: 'webhook not found', status: 404 };
+
+  // Name uniqueness check (only if name actually changed).
+  const existing = file.watchers[idx] as WebhookWatcherCfg;
+  if (input.name && input.name !== existing.name) {
+    for (let i = 0; i < file.watchers.length; i++) {
+      if (i === idx) continue;
+      if (file.watchers[i].name === input.name) {
+        return { ok: false, error: `name already exists: ${input.name}`, status: 409 };
+      }
+    }
+  }
+
+  const updated: WebhookWatcherCfg = {
+    name: (input.name || existing.name).trim(),
+    type: 'webhook',
+    slug, // immutable
+    secret_env: (input.secret_env || existing.secret_env).trim(),
+    mode: input.mode || existing.mode || 'test',
+    actions: input.actions || existing.actions,
+  };
+  file.watchers[idx] = updated;
+  writeWatchersYaml(file);
+  return { ok: true, watcher: updated };
+}
+
+export function deleteWebhookWatcher(slug: string): { ok: true } | { ok: false; error: string; status: number } {
+  if (!SLUG_RE.test(slug)) return { ok: false, error: 'invalid slug', status: 400 };
+
+  const file = readWatchersYaml();
+  const idx = file.watchers.findIndex((w) => w.type === 'webhook' && w.slug === slug);
+  if (idx < 0) return { ok: false, error: 'webhook not found', status: 404 };
+
+  // Refuse to delete log-tail / sqlite-poll via API. Belt and braces:
+  // findIndex above already filtered to type='webhook', so this can't
+  // happen — but the explicit guard documents the policy.
+  if (file.watchers[idx].type !== 'webhook') {
+    return { ok: false, error: 'only webhook watchers can be deleted via API', status: 400 };
+  }
+
+  file.watchers.splice(idx, 1);
+  writeWatchersYaml(file);
+  return { ok: true };
+}
+
 // ── Log-tail watcher ──────────────────────────────────────────────────────────
 
 function startLogTail(cfg: LogTailWatcherCfg): void {

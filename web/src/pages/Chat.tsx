@@ -3,6 +3,7 @@ import { Send, Square, Sparkles, ArrowDown } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { PageState } from '@/components/PageState';
 import { StatusDot } from '@/components/Pill';
+import { SkillPicker } from '@/components/SkillPicker';
 import { useFetch } from '@/lib/useFetch';
 import { apiGet, apiPost, chatId } from '@/lib/api';
 import { renderMarkdown } from '@/lib/markdown';
@@ -36,6 +37,12 @@ export function Chat() {
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamConnected = chatStreamConnected.value;
+  // SkillPicker state. The picker mounts persistently so its catalog
+  // stays cached across opens; we just toggle `pickerOpen`.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // When the picker opens via "/-typing", we seed it with whatever the
+  // user has already typed after the slash so they don't have to retype.
+  const [pickerInitialQuery, setPickerInitialQuery] = useState('');
   // Track whether the message list is scrolled near the bottom. Drives
   // the floating "scroll to latest" button and tells the auto-scroll
   // effect whether it's safe to jump on a new turn (we don't yank the
@@ -151,6 +158,57 @@ export function Chat() {
     inputRef.current?.focus();
   }
 
+  // Insert "/<id> " at the current caret. If the textarea already starts
+  // with "/<token>" (the user typed a slash to open the picker), replace
+  // that prefix instead of stacking another slash.
+  function insertSkill(slug: string) {
+    const ta = inputRef.current;
+    if (!ta) return;
+    const value = draft;
+    const insertText = '/' + slug + ' ';
+    let nextValue: string;
+    let nextCaret: number;
+    const startsWithSlashToken = /^\/[a-zA-Z0-9_-]*$/.test(value.trim()) && value.trim() === value.trimStart();
+    if (startsWithSlashToken) {
+      // Replace the entire leading slash-token. Preserves anything after
+      // it (which there shouldn't be given the regex, but be safe).
+      nextValue = insertText + value.slice(value.indexOf(value.trim()) + value.trim().length);
+      nextCaret = insertText.length;
+    } else {
+      const caret = ta.selectionStart ?? value.length;
+      nextValue = value.slice(0, caret) + insertText + value.slice(caret);
+      nextCaret = caret + insertText.length;
+    }
+    setDraft(nextValue);
+    setPickerOpen(false);
+    // Restore focus + caret on next tick (after re-render).
+    queueMicrotask(() => {
+      const t = inputRef.current;
+      if (!t) return;
+      t.focus();
+      t.setSelectionRange(nextCaret, nextCaret);
+    });
+  }
+
+  function onComposerKeyDown(e: KeyboardEvent) {
+    // Open the picker when the user types "/" as the first character.
+    // We catch this on keydown so the slash never lands in the textarea
+    // — opening the picker BEFORE the slash propagates makes the inline
+    // and button-triggered flows feel identical.
+    if (e.key === '/' && draft.length === 0 && !pickerOpen) {
+      e.preventDefault();
+      setPickerInitialQuery('');
+      setPickerOpen(true);
+      return;
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      // If picker is open, Enter is the picker's job.
+      if (pickerOpen) return;
+      e.preventDefault();
+      if (draft.trim()) void send();
+    }
+  }
+
   const agentList = agents.data?.agents ?? [];
   const activeAgentObj = agentList.find((a) => a.id === activeAgent);
   const todayCost = activeAgent === 'all'
@@ -226,26 +284,44 @@ export function Chat() {
               </button>
             ))}
           </div>
-          <div class="flex items-end gap-2">
+          {/* Composer row. The wrapping div is `relative` so SkillPicker
+              can anchor its popover to it (bottom-full + left-0). */}
+          <div class="relative flex items-end gap-2">
+            <SkillPicker
+              open={pickerOpen}
+              onClose={() => setPickerOpen(false)}
+              onPick={(s) => insertSkill(s.id)}
+              initialQuery={pickerInitialQuery}
+            />
             <textarea
               ref={inputRef}
               value={draft}
               onInput={(e) => setDraft((e.target as HTMLTextAreaElement).value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  if (draft.trim()) void send();
-                }
-              }}
-              placeholder="Type a message. Shift+Enter for newline."
+              onKeyDown={onComposerKeyDown}
+              placeholder="Type a message. Shift+Enter for newline. Try / for commands."
               rows={1}
               class="flex-1 bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[var(--color-accent)] resize-none max-h-32"
             />
+            <button
+              type="button"
+              onClick={() => { setPickerInitialQuery(''); setPickerOpen((v) => !v); }}
+              aria-haspopup="listbox"
+              aria-expanded={pickerOpen}
+              title="Show slash commands"
+              class={[
+                'inline-flex items-center gap-1 px-2.5 py-2 rounded-lg text-[11.5px] font-medium border transition-colors shrink-0',
+                pickerOpen
+                  ? 'bg-[var(--color-accent-soft)] text-[var(--color-text)] border-[var(--color-accent)]/40'
+                  : 'bg-[var(--color-elevated)] text-[var(--color-text-muted)] border-[var(--color-border)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]',
+              ].join(' ')}
+            >
+              <span class="font-mono">/</span> Commands
+            </button>
             {processing ? (
               <button
                 type="button"
                 onClick={abort}
-                class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-[12px] font-medium bg-[var(--color-status-failed)] text-white hover:opacity-90 transition-opacity"
+                class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-[12px] font-medium bg-[var(--color-status-failed)] text-white hover:opacity-90 transition-opacity shrink-0"
               >
                 <Square size={12} fill="currentColor" /> Stop
               </button>
@@ -254,7 +330,7 @@ export function Chat() {
                 type="button"
                 onClick={() => void send()}
                 disabled={!draft.trim() || sending}
-                class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-[12px] font-medium bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-[12px] font-medium bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
               >
                 <Send size={12} /> {sending ? 'Sending…' : 'Send'}
               </button>

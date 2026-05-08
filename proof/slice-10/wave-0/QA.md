@@ -51,11 +51,32 @@ Runs captured in:
 
 Files: `data-integrity-pre.txt`, `data-integrity-post.txt`.
 
+## Fixture handling — production runtime parity
+
+The repo ships only `agents/<id>/agent.yaml.example` files; runtime
+`agent.yaml` files live in the user's `CLAUDECLAW_CONFIG` directory
+(default `~/.claudeclaw/agents/<id>/agent.yaml`). This is the same
+pattern documented in `src/agent-config.ts`:`resolveAgentDir()` —
+external dir wins over repo path.
+
+The Wave-0 proof harness mirrors that: `build-fixture-and-sample.ts`
+writes the fixture tree to `proof/slice-10/wave-0/fixture/` and re-execs
+itself with `CLAUDECLAW_CONFIG=<fixture>` set, so the real
+`readOrgChartV2()` resolves agent.yaml files from the fixture, not
+from `agents/*/agent.yaml.example`. `humans.yaml` is intercepted at
+`fs.readFileSync` for the single PROJECT_ROOT path so we don't have
+to mutate the worktree to drive the reader.
+
+This means the captured `api-org-chart-v2-sample.json` is byte-faithful
+to what `/api/org-chart-v2` returns at runtime when an operator's
+`~/.claudeclaw/agents/` is populated — no re-implementation, no
+schema drift.
+
 ## New endpoint shape
 
-`api-org-chart-v2-sample.json` — captured by driving `readOrgChartV2()`
-against a fixture tree that mirrors all 8 production agents +
-`humans.yaml`.
+`api-org-chart-v2-sample.json` — captured by driving the REAL
+`readOrgChartV2()` from `src/org-chart-v2.ts` against the fixture tree
+that mirrors all 8 production agents + `humans.yaml`.
 
 Total nodes: **10** (joe, ali, meta, comms, content, research, ops,
 clawds, trading-monitor, goldbot-labs).
@@ -136,9 +157,9 @@ _<set after reviewer signs off in REVIEW.md>_
 - `proof/slice-10/wave-0/api-org-chart-v2-sample.json`       — endpoint payload sample
 - `proof/slice-10/wave-0/api-existing-org-chart-live.txt`    — Slice 3 endpoints unchanged
 - `proof/slice-10/wave-0/org-tree-decisions.md`              — reports_to rationale
-- `proof/slice-10/wave-0/build-fixture-and-sample.ts`        — fixture builder
-- `proof/slice-10/wave-0/read-fixture.ts`                    — fixture reader
+- `proof/slice-10/wave-0/build-fixture-and-sample.ts`        — fixture builder + driver of the real readOrgChartV2()
 - `proof/slice-10/wave-0/sample-endpoint.ts`                 — driver against worktree state
+- `src/org-chart-v2.test.ts`                                 — vitest coverage of the reader (humans first, AI second; reports_to round-trip; cross-tier tree)
 - `agents/schema.md`                              — schema documentation
 - `scripts/migrate-org-v2.ts`                     — migration script
 - `src/org-chart-v2.ts`                           — new reader module

@@ -80,3 +80,46 @@
 ## Verdict
 
 _<reviewer fills in: APPROVED / CHANGES REQUESTED, with findings>_
+
+## Resolution log — finding "proof sample fabricated"
+
+Reviewer flagged that `api-org-chart-v2-sample.json` was being produced
+by `read-fixture.ts`, which manually re-implemented the reader's parse
+logic instead of importing `readOrgChartV2()` from `src/org-chart-v2.ts`.
+Risk: silent drift between the proof artifact and the live route.
+
+**Fix landed:**
+
+1. `proof/slice-10/wave-0/build-fixture-and-sample.ts` rewritten to
+   stage the fixture tree under `CLAUDECLAW_CONFIG` and re-exec itself
+   in a child process that imports the REAL `readOrgChartV2()` —
+   the child sets `CLAUDECLAW_CONFIG=<fixture>` and intercepts
+   `fs.readFileSync` for the single PROJECT_ROOT/humans.yaml path so
+   the worktree's humans.yaml doesn't have to be mutated. The captured
+   sample is now byte-faithful to the live route.
+2. `read-fixture.ts` deleted (no longer needed).
+3. `src/org-chart-v2.test.ts` added — two vitest cases that mock
+   `./config.js` to redirect PROJECT_ROOT + CLAUDECLAW_CONFIG into a
+   tmpdir, stage humans.yaml + 3 agent.yaml fixtures (one human-typed,
+   one AI with `reports_to: "joe"`, one AI with `reports_to: "meta"`,
+   one AI with no `reports_to` field), and assert the reader's flat-array
+   shape + cross-tier tree.
+4. `QA.md` updated with a "Fixture handling — production runtime parity"
+   section that documents the `CLAUDECLAW_CONFIG`-as-fixture-root pattern,
+   matching the existing `resolveAgentDir()` lookup contract.
+
+The "no committed AI agent.yaml" question is resolved by Path 1 in
+the brief: the project's runtime contract puts agent.yaml in
+`CLAUDECLAW_CONFIG`, only `.example` files ship in the repo. The proof
+harness now bootstraps a fixture `CLAUDECLAW_CONFIG` from scratch,
+so reviewer's "running the real reader against the committed tree
+returns empty" observation is by design.
+
+**Verification commands:**
+
+```
+npx tsc --noEmit                                      # 0 errors (unchanged baseline)
+npx vitest run src/org-chart-v2.test.ts               # 2 tests pass
+npx tsx proof/slice-10/wave-0/build-fixture-and-sample.ts
+                                                      # regenerates sample.json via real reader
+```

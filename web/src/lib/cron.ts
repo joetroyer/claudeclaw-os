@@ -255,3 +255,144 @@ export function describeCron(cron: string): CronDescription {
   // Fall back to raw — multi-minute multi-hour combinations get noisy fast.
   return { ok: true, text: cron };
 }
+
+// ── Interval estimation ─────────────────────────────────────────────
+// Estimates the typical seconds-between-fires for a cron expression so
+// callers can decide whether the `last_run` of a scheduled task is
+// "late" relative to the schedule (eg. a daily 9am task whose last_run
+// is 26 hours ago is one missed cycle). Returns null when the cron
+// shape is something we can't reasonably reduce to a single interval
+// (very irregular schedules) — caller should treat that as "unknown
+// cadence" and skip the freshness check.
+//
+// We deliberately favor a conservative upper bound: if the cron fires
+// multiple times per day (eg. weekdays at 9am AND 5pm), we report the
+// LARGEST gap between fires, since that's the gap we'd be considered
+// "late" against. This keeps the status-dot logic from yelling on
+// schedules that legitimately have uneven spacing.
+export function estimateCronIntervalSec(cron: string): number | null {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [mField, hField, domField, monField, dowField] = parts;
+  const mins = expandField(mField, 0, 59);
+  const hours = expandField(hField, 0, 23);
+  const doms = expandField(domField, 1, 31);
+  const months = expandField(monField, 1, 12);
+  const dows = expandField(dowField, 0, 7);
+  if (!mins || !hours || !doms || !months || !dows) return null;
+
+  // Step minutes: "*/N * * * *"
+  if (mField.startsWith('*/') && hField === '*' && domField === '*' && monField === '*' && dowField === '*') {
+    const step = parseInt(mField.slice(2), 10);
+    return step > 0 ? step * 60 : null;
+  }
+  // Step hours: "MM */N * * *" or "0 */N * * *"
+  if (hField.startsWith('*/') && domField === '*' && monField === '*' && dowField === '*' && mins.length === 1) {
+    const step = parseInt(hField.slice(2), 10);
+    return step > 0 ? step * 3600 : null;
+  }
+  // Skip month-of-year shapes — too irregular to summarise as a single interval.
+  if (monField !== '*') return null;
+  // Day-of-month shapes (eg. "1st of every month") — approximate as 30d.
+  if (domField !== '*') return 30 * 86400;
+
+  // Day-of-week + fixed times: build the explicit weekly fire set, find
+  // the largest gap.
+  const everyDow =
+    dows.length === 7 || (dows.length === 8 && dows.includes(0) && dows.includes(7));
+  const dowSet = everyDow
+    ? [0, 1, 2, 3, 4, 5, 6]
+    : Array.from(new Set(dows.map((d) => (d === 7 ? 0 : d)))).sort((a, b) => a - b);
+  if (dowSet.length === 0) return null;
+
+  // Build every (dow, hour, minute) fire over a single week.
+  const fires: number[] = []; // seconds since week-start
+  for (const d of dowSet) {
+    for (const h of hours) {
+      for (const m of mins) {
+        fires.push(d * 86400 + h * 3600 + m * 60);
+      }
+    }
+  }
+  fires.sort((a, b) => a - b);
+  if (fires.length === 0) return null;
+  if (fires.length === 1) return 7 * 86400; // weekly cadence
+
+  // Largest gap, including the wrap-around from last fire of week back
+  // to the first fire of next week.
+  let maxGap = 0;
+  for (let i = 1; i < fires.length; i++) {
+    maxGap = Math.max(maxGap, fires[i] - fires[i - 1]);
+  }
+  const wrap = 7 * 86400 - fires[fires.length - 1] + fires[0];
+  maxGap = Math.max(maxGap, wrap);
+  return maxGap;
+}
+
+// ── Health classification ───────────────────────────────────────────
+// Decides the status-dot tone for a scheduled task row given its raw
+// fields. Rules (per Slice 9 Wave 1C spec):
+//
+//   green   last_status = success AND last_run within 1× expected interval
+//   yellow  missed by 1× interval (between 1× and 2×)
+//   red     missed by 2×+ intervals OR last_status = failed/timeout
+//   neutral schedule shape we can't estimate, OR no run history yet
+//
+// Tones returned use the existing Pill/StatusDot palette.
+export type HealthTone = 'done' | 'medium' | 'failed' | 'neutral';
+
+export interface HealthStat {
+  tone: HealthTone;
+  label: string; // short human label, eg. "healthy", "late", "failing"
+  intervalSec: number | null;
+}
+
+export function classifyTaskHealth(args: {
+  cron: string;
+  lastRun: number | null;       // unix seconds
+  lastStatus: 'success' | 'failed' | 'timeout' | null;
+  status: 'active' | 'paused' | 'running';
+  nowSec?: number;
+}): HealthStat {
+  const now = args.nowSec ?? Math.floor(Date.now() / 1000);
+  const interval = estimateCronIntervalSec(args.cron);
+
+  // Hard fails first — independent of cadence.
+  if (args.lastStatus === 'failed') {
+    return { tone: 'failed', label: 'last run failed', intervalSec: interval };
+  }
+  if (args.lastStatus === 'timeout') {
+    return { tone: 'medium', label: 'last run timed out', intervalSec: interval };
+  }
+
+  // Paused tasks: don't grade freshness — operator chose to pause.
+  if (args.status === 'paused') {
+    return { tone: 'neutral', label: 'paused', intervalSec: interval };
+  }
+
+  // No history yet — neutral, not red. New task that hasn't fired.
+  if (!args.lastRun) {
+    return { tone: 'neutral', label: 'awaiting first run', intervalSec: interval };
+  }
+
+  // Can't estimate cadence — surface last status without a freshness verdict.
+  if (interval === null) {
+    return args.lastStatus === 'success'
+      ? { tone: 'done', label: 'last run ok', intervalSec: null }
+      : { tone: 'neutral', label: 'last run unknown', intervalSec: null };
+  }
+
+  const age = now - args.lastRun;
+  // Add a 10% tolerance band so a fire that lands a few seconds late
+  // doesn't immediately tip yellow.
+  const slack = Math.max(60, interval * 0.1);
+  if (age > 2 * interval + slack) {
+    return { tone: 'failed', label: 'overdue', intervalSec: interval };
+  }
+  if (age > interval + slack) {
+    return { tone: 'medium', label: 'late', intervalSec: interval };
+  }
+  return args.lastStatus === 'success'
+    ? { tone: 'done', label: 'healthy', intervalSec: interval }
+    : { tone: 'done', label: 'on schedule', intervalSec: interval };
+}

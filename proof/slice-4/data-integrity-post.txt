@@ -1,0 +1,75 @@
+=== launchctl agent count ===
+       8
+=== mission_tasks count (non-test) ===
+4
+=== watchers in watchers.yaml ===
+9
+=== watcher names ===
+wa-daemon-health
+tunnel-health
+bot-fatal
+warroom-voice-health
+stuck-mission-tasks
+meet-session-stale-cleanup
+incoming-whatsapp-vip
+trading-monitor-trigger
+n8n-error-router
+=== watcher types (4 log-tail / 3 sqlite-poll / 2 webhook expected) ===
+   4 log-tail
+   3 sqlite-poll
+   2 webhook
+=== git diff main -- agents/CLAUDE.md (size in lines, expect 0) ===
+       0
+=== git diff main -- agents/agent.yaml (size in lines, expect 0) ===
+       0
+=== git diff main -- watchers.yaml (only additions to existing entries, expect 0 removals) ===
+removed lines: 0
+added lines:   75
+=== git diff main -- src/watchers.ts (no edits to existing arms, only additions) ===
+removed lines: 5
+added lines:   249
+=== existing tables (33 expected — old set + n8n_workflow_owners) ===
+agent_file_history
+agent_suggestions
+audit_log
+compaction_events
+consolidations
+conversation_log
+dashboard_settings
+hive_mind
+inter_agent_tasks
+meet_sessions
+memories
+memories_fts
+memories_fts_config
+memories_fts_data
+memories_fts_docsize
+memories_fts_idx
+mission_tasks
+n8n_workflow_owners
+scheduled_tasks
+session_summaries
+sessions
+skill_health
+skill_usage
+slack_messages
+token_usage
+wa_message_map
+wa_messages
+wa_outbox
+warroom_meetings
+warroom_transcript
+webhook_payloads
+workflow_runs
+workflow_stages
+=== n8n_workflow_owners present (NEW, additive) ===
+CREATE TABLE n8n_workflow_owners (
+  workflow_id  TEXT    PRIMARY KEY,
+  agent_id     TEXT    NOT NULL,
+  created_at   INTEGER NOT NULL
+);
+=== git log on slice-4 branch ===
+af86bba test(slice-4): vitest contract suite for n8n routing
+64e38b6 feat(slice-4): n8n-error-router watcher entry + env documentation
+3a3fabb feat(slice-4): lookup-owner / if-owned / if-unowned / send-slack actions
+f67686b feat(slice-4): n8n_workflow_owners table + read/write helpers

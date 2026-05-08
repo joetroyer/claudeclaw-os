@@ -140,3 +140,78 @@ watchers:
             {payload_raw}
 
             Parse it, classify priority, log to hive_mind, and notify Joe if priority=high. Do NOT trade. Do NOT send orders.
+
+  # 9. n8n error router (Slice 4).
+  #    n8n's error workflow POSTs (HMAC-signed) to
+  #    https://clawos.joetroyer.com/api/watchers/webhook/n8n-error
+  #
+  #    Expected payload shape (draft — see proof/slice-4/n8n-payload-schema.md):
+  #      {
+  #        "workflow_id":     "wf_lab_etl_42",        # required, used for owner lookup
+  #        "workflow_name":   "Goldbot ETL",          # optional, for display
+  #        "error_message":   "Connection refused...",# required, used for signature
+  #        "error_signature": "ENOTFOUND-broker-api", # optional, overrides hash
+  #        "execution_id":    "exec_2c4e8...",        # optional
+  #        "execution_url":   "https://n8n/.../exec/" # optional, link in Slack
+  #      }
+  #
+  #    Routing:
+  #      - lookup-owner reads `payload.workflow_id`, queries
+  #        n8n_workflow_owners, sets vars._owner_agent / _owner_found and
+  #        applies a 60s debounce keyed by workflow_id + error_signature.
+  #      - if-owned   → mission_task on the owning agent.
+  #      - if-unowned → mission_task on `meta` (triage) AND a Slack post
+  #                      with a link to /mission so Joe can see it.
+  #
+  #    Mode lifecycle (same as Slice 2): ships as `test`. Flip to `run`
+  #    after a real n8n payload has been observed in webhook_payloads
+  #    and the ownership table seeded for the production workflows.
+  - name: n8n-error-router
+    type: webhook
+    slug: n8n-error
+    secret_env: N8N_ERROR_SECRET
+    mode: test
+    actions:
+      - lookup-owner:
+          workflow_field: workflow_id
+          signature_field: error_signature
+          debounce_sec: 60
+      - if-owned:
+          - queue-mission:
+              agent: "{_owner_agent}"
+              title: "n8n error: {payload.workflow_name} ({_workflow_id})"
+              prompt: |
+                An n8n workflow you own errored out.
+
+                Workflow: {payload.workflow_name} (id: {_workflow_id})
+                Error: {payload.error_message}
+                Execution: {payload.execution_url}
+
+                Raw payload:
+                {payload_raw}
+
+                Investigate the failure. If it's transient, note it and stand down. If the workflow needs a code/config fix, propose the fix and (when safe) apply it via the n8n CLI. Do NOT modify other agents' workflows.
+      - if-unowned:
+          - queue-mission:
+              agent: meta
+              title: "n8n triage: unowned workflow {_workflow_id}"
+              prompt: |
+                An n8n workflow with no registered owner errored out.
+
+                Workflow: {payload.workflow_name} (id: {_workflow_id})
+                Error: {payload.error_message}
+                Execution: {payload.execution_url}
+
+                Raw payload:
+                {payload_raw}
+
+                Decide which agent should own this workflow going forward. To assign:
+                  sqlite3 store/claudeclaw.db "INSERT INTO n8n_workflow_owners (workflow_id, agent_id, created_at) VALUES ('{_workflow_id}', '<agent>', strftime('%s','now'));"
+                Then re-run the workflow in n8n to confirm routing.
+          - send-slack:
+              webhook_url_env: SLACK_WEBHOOK_URL
+              template: |
+                :rotating_light: Unowned n8n workflow errored.
+                Workflow: {payload.workflow_name} (id: {_workflow_id})
+                Error: {payload.error_message}
+                Triage at https://clawos.joetroyer.com/mission

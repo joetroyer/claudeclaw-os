@@ -1,0 +1,86 @@
+--- STEP 1: seed owner wf_demo_owned -> research ---
+--- STEP 2: POST signed (owned workflow) ---
+  status = 200
+  queued = [ 'wat_mow6m5cq_ej76s3' ]
+  task assigned_agent = research
+  task title          = n8n error: Demo Owned (wf_demo_owned)
+--- STEP 3: POST unsigned (HMAC enforced) ---
+  status = 401 (expect 401)
+  reason = missing signature
+--- STEP 4: POST signed (UNOWNED workflow) ---
+  status = 200
+  queued = [ 'wat_mow6m5cs_pa6g9q' ]
+  task assigned_agent = meta (expect meta)
+  task title          = n8n triage: unowned workflow wf_demo_unowned
+  slack calls         = 1 (expect 1)
+  slack text snippet  = :rotating_light: Unowned n8n workflow errored.
+Workflow: Mystery (id: wf_demo_un...
+--- STEP 5: POST same UNOWNED payload again (debounce) ---
+  status = 200
+  queued = [] (expect [])
+--- STEP 6: POST DIFFERENT error_signature for same workflow (NOT debounced) ---
+  status = 200
+  queued = [ 'wat_mow6m5cu_ixzyre' ] (expect 1 mission)
+--- DONE ---
+[20:33:34.864] [32mINFO[39m (41099): [36mMigration: added agent_id column to memories table[39m
+[20:33:34.864] [32mINFO[39m (41099): [36mMigration: added embedding column to consolidations table[39m
+[20:33:34.864] [32mINFO[39m (41099): [36mMigration: restricted FTS5 update trigger to content columns only[39m
+[20:33:34.865] [32mINFO[39m (41099): [36mMigration: added superseded_by column to memories table[39m
+[20:33:34.865] [32mINFO[39m (41099): [36mMigration: added pinned column to memories table[39m
+[20:33:34.874] [32mINFO[39m (41099): [36mwatcher: queued mission task[39m
+    [35mid[39m: "wat_mow6m5cq_ej76s3"
+    [35magent[39m: "research"
+    [35mtitle[39m: "n8n error: Demo Owned (wf_demo_owned)"
+    [35mcreatedBy[39m: "watcher"
+[20:33:34.874] [32mINFO[39m (41099): [36mDashboard POST /api/watchers/webhook/n8n-error 200[39m
+    [35mmethod[39m: "POST"
+    [35mpath[39m: "/api/watchers/webhook/n8n-error"
+    [35mstatus[39m: 200
+    [35mip[39m: "unknown"
+    [35mua[39m: "unknown"
+    [35mms[39m: 4
+[20:33:34.876] [33mWARN[39m (41099): [36mwebhook: rejected[39m
+    [35mslug[39m: "n8n-error"
+    [35mmode[39m: "test"
+    [35mreason[39m: "missing signature"
+[20:33:34.876] [33mWARN[39m (41099): [36mDashboard POST /api/watchers/webhook/n8n-error 401[39m
+    [35mmethod[39m: "POST"
+    [35mpath[39m: "/api/watchers/webhook/n8n-error"
+    [35mstatus[39m: 401
+    [35mip[39m: "unknown"
+    [35mua[39m: "unknown"
+    [35mms[39m: 1
+[20:33:34.877] [32mINFO[39m (41099): [36mwatcher: queued mission task[39m
+    [35mid[39m: "wat_mow6m5cs_pa6g9q"
+    [35magent[39m: "meta"
+    [35mtitle[39m: "n8n triage: unowned workflow wf_demo_unowned"
+    [35mcreatedBy[39m: "watcher"
+[20:33:34.877] [32mINFO[39m (41099): [36mDashboard POST /api/watchers/webhook/n8n-error 200[39m
+    [35mmethod[39m: "POST"
+    [35mpath[39m: "/api/watchers/webhook/n8n-error"
+    [35mstatus[39m: 200
+    [35mip[39m: "unknown"
+    [35mua[39m: "unknown"
+    [35mms[39m: 1
+[20:33:34.877] [32mINFO[39m (41099): [36mwatcher: n8n debounce hit — skipping nested actions[39m
+    [35mworkflow_id[39m: "wf_demo_unowned"
+    [35merror_signature[39m: "fp_xyz"
+[20:33:34.878] [32mINFO[39m (41099): [36mDashboard POST /api/watchers/webhook/n8n-error 200[39m
+    [35mmethod[39m: "POST"
+    [35mpath[39m: "/api/watchers/webhook/n8n-error"
+    [35mstatus[39m: 200
+    [35mip[39m: "unknown"
+    [35mua[39m: "unknown"
+    [35mms[39m: 1
+[20:33:34.878] [32mINFO[39m (41099): [36mwatcher: queued mission task[39m
+    [35mid[39m: "wat_mow6m5cu_ixzyre"
+    [35magent[39m: "meta"
+    [35mtitle[39m: "n8n triage: unowned workflow wf_demo_unowned"
+    [35mcreatedBy[39m: "watcher"
+[20:33:34.878] [32mINFO[39m (41099): [36mDashboard POST /api/watchers/webhook/n8n-error 200[39m
+    [35mmethod[39m: "POST"
+    [35mpath[39m: "/api/watchers/webhook/n8n-error"
+    [35mstatus[39m: 200
+    [35mip[39m: "unknown"
+    [35mua[39m: "unknown"
+    [35mms[39m: 0

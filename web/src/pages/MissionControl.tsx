@@ -1232,11 +1232,18 @@ function ActivityFeed({ agents }: { agents: Agent[] }) {
   // Source label click → spec page. Workflow rows scroll to the top of
   // mission control (where the workflows banner would render once Slice 6
   // lands; for now this is a no-op visual cue).
-  function navigateToSource(source: string | null) {
+  //
+  // Triggered.tsx (Wave 1B) and Scheduled.tsx (Wave 1C, in main) do not
+  // yet read the slug/id query params — this is future-wiring. The
+  // params are harmless if ignored and correctly attribute the click
+  // intent for when those pages add pre-selection.
+  function navigateToSource(source: string | null, sourceId: string | null) {
     if (source === 'webhook' || source === 'log-tail' || source === 'sqlite-poll') {
-      navigate('/triggered');
+      const qs = sourceId ? `?slug=${encodeURIComponent(sourceId)}` : '';
+      navigate(`/triggered${qs}`);
     } else if (source === 'scheduled') {
-      navigate('/scheduled');
+      const qs = sourceId ? `?id=${encodeURIComponent(sourceId)}` : '';
+      navigate(`/scheduled${qs}`);
     } else if (source === 'workflow') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -1394,7 +1401,7 @@ function ActivityFeed({ agents }: { agents: Agent[] }) {
                       key={r.id}
                       row={r}
                       indent
-                      onSourceClick={() => navigateToSource(r.source)}
+                      onSourceClick={() => navigateToSource(r.source, r.source_id)}
                     />
                   ))}
                 </div>
@@ -1404,7 +1411,7 @@ function ActivityFeed({ agents }: { agents: Agent[] }) {
               <ActivityRowItem
                 key={it.row.id + ':' + idx}
                 row={it.row}
-                onSourceClick={() => navigateToSource(it.row.source)}
+                onSourceClick={() => navigateToSource(it.row.source, it.row.source_id)}
               />
             );
           })}

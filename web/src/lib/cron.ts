@@ -357,15 +357,9 @@ export function classifyTaskHealth(args: {
   const now = args.nowSec ?? Math.floor(Date.now() / 1000);
   const interval = estimateCronIntervalSec(args.cron);
 
-  // Hard fails first — independent of cadence.
-  if (args.lastStatus === 'failed') {
-    return { tone: 'failed', label: 'last run failed', intervalSec: interval };
-  }
-  if (args.lastStatus === 'timeout') {
-    return { tone: 'medium', label: 'last run timed out', intervalSec: interval };
-  }
-
-  // Paused tasks: don't grade freshness — operator chose to pause.
+  // Paused wins over historical last_status. An operator who hits Pause
+  // shouldn't see a red "failed" dot from a stale prior run — paused
+  // means "stop grading me" until they resume.
   if (args.status === 'paused') {
     return { tone: 'neutral', label: 'paused', intervalSec: interval };
   }
@@ -373,6 +367,15 @@ export function classifyTaskHealth(args: {
   // No history yet — neutral, not red. New task that hasn't fired.
   if (!args.lastRun) {
     return { tone: 'neutral', label: 'awaiting first run', intervalSec: interval };
+  }
+
+  // Hard fails next — independent of cadence, but only for active tasks
+  // that have actually run.
+  if (args.lastStatus === 'failed') {
+    return { tone: 'failed', label: 'last run failed', intervalSec: interval };
+  }
+  if (args.lastStatus === 'timeout') {
+    return { tone: 'medium', label: 'last run timed out', intervalSec: interval };
   }
 
   // Can't estimate cadence — surface last status without a freshness verdict.

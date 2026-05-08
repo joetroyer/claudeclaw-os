@@ -605,6 +605,7 @@ export function OrgChartV2() {
                 />
               ))}
             </div>
+          </div>
         </div>
       )}
 

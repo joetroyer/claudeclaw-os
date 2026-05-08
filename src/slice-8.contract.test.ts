@@ -48,7 +48,10 @@ beforeEach(() => {
     _watchersBackup = null;
   }
   // Seed a known-good multi-watcher YAML so deletions / edits can be
-  // verified against a stable baseline.
+  // verified against a stable baseline. Includes production log-tail /
+  // sqlite-poll names (wa-daemon-health, stuck-mission-tasks) so the
+  // delete-refused tests can target them by name without depending on
+  // the real watchers.yaml on disk.
   const seed = `# test seed — slice-8.contract.test
 watchers:
   - name: log-tail-canary
@@ -59,12 +62,27 @@ watchers:
         actions:
           - send-telegram: "log canary fired"
 
+  - name: wa-daemon-health
+    type: log-tail
+    path: /tmp/wa-daemon.log
+    triggers:
+      - regex: "ERROR"
+        actions:
+          - send-telegram: "wa-daemon error"
+
   - name: sqlite-poll-canary
     type: sqlite-poll
     sql: "SELECT 1 as id"
     interval_sec: 60
     actions:
       - send-telegram: "sqlite canary fired"
+
+  - name: stuck-mission-tasks
+    type: sqlite-poll
+    sql: "SELECT id FROM mission_tasks WHERE status='running'"
+    interval_sec: 60
+    actions:
+      - send-telegram: "stuck task"
 
   - name: existing-webhook
     type: webhook
@@ -347,5 +365,35 @@ describe('DELETE /api/watchers/:slug (webhook delete)', () => {
       method: 'DELETE',
     });
     expect([400, 404]).toContain(res.status);
+  });
+
+  it('refuses log-tail watchers with 403', async () => {
+    const before = fs.readFileSync(WATCHERS_PATH, 'utf-8');
+    const res = await app.request(url('/api/watchers/wa-daemon-health'), {
+      method: 'DELETE',
+    });
+    expect(res.status).toBe(403);
+    const j: any = await res.json();
+    expect(j.error).toBe('operator-managed');
+    expect(j.message).toMatch(/log-tail and sqlite-poll watchers are managed in watchers\.yaml/);
+    // Underlying watchers.yaml must NOT have been modified by the call.
+    const after = fs.readFileSync(WATCHERS_PATH, 'utf-8');
+    expect(after).toBe(before);
+    expect(after).toMatch(/wa-daemon-health/);
+  });
+
+  it('refuses sqlite-poll watchers with 403', async () => {
+    const before = fs.readFileSync(WATCHERS_PATH, 'utf-8');
+    const res = await app.request(url('/api/watchers/stuck-mission-tasks'), {
+      method: 'DELETE',
+    });
+    expect(res.status).toBe(403);
+    const j: any = await res.json();
+    expect(j.error).toBe('operator-managed');
+    expect(j.message).toMatch(/log-tail and sqlite-poll watchers are managed in watchers\.yaml/);
+    // Underlying watchers.yaml must NOT have been modified by the call.
+    const after = fs.readFileSync(WATCHERS_PATH, 'utf-8');
+    expect(after).toBe(before);
+    expect(after).toMatch(/stuck-mission-tasks/);
   });
 });

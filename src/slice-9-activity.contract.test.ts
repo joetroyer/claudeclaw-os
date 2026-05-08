@@ -98,9 +98,9 @@ function authUrl(p: string): string {
 
 describe('Slice 9 Wave 0: schema + queue-side provenance', () => {
   it('createMissionTask records source + source_id', () => {
-    createMissionTask('row1', 'manual create', 'p', 'main', 'dashboard', 0, 'manual', null);
-    createMissionTask('row2', 'cli create', 'p', 'main', 'cli', 0, 'mission_cli', null);
-    createMissionTask('row3', 'workflow stage', 'p', 'main', 'workflow', 5, 'workflow', 'wfr_abc');
+    createMissionTask('row1', 'manual create', 'p', 'main', 'dashboard', 0, false, false, 'manual', null);
+    createMissionTask('row2', 'cli create', 'p', 'main', 'cli', 0, false, false, 'mission_cli', null);
+    createMissionTask('row3', 'workflow stage', 'p', 'main', 'workflow', 5, false, false, 'workflow', 'wfr_abc');
     createMissionTask('row4', 'legacy', 'p', 'main'); // no source — legacy NULL path
 
     const Database = require('better-sqlite3');
@@ -178,10 +178,10 @@ describe('Slice 9 Wave 0: POST /api/hooks/:slug (canonical) + alias', () => {
 describe('Slice 9 Wave 0: GET /api/activity', () => {
   function seed(): void {
     const now = Math.floor(Date.now() / 1000);
-    createMissionTask('a1', 'webhook one', 'p', 'main', 'watcher', 50, 'webhook', 'test-activity');
-    createMissionTask('a2', 'workflow stage', 'p', 'main', 'workflow', 5, 'workflow', 'wfr_xyz');
-    createMissionTask('a3', 'manual one', 'p', 'meta', 'dashboard', 0, 'manual', null);
-    createMissionTask('a4', 'cli one', 'p', 'comms', 'cli', 0, 'mission_cli', null);
+    createMissionTask('a1', 'webhook one', 'p', 'main', 'watcher', 50, false, false, 'webhook', 'test-activity');
+    createMissionTask('a2', 'workflow stage', 'p', 'main', 'workflow', 5, false, false, 'workflow', 'wfr_xyz');
+    createMissionTask('a3', 'manual one', 'p', 'meta', 'dashboard', 0, false, false, 'manual', null);
+    createMissionTask('a4', 'cli one', 'p', 'comms', 'cli', 0, false, false, 'mission_cli', null);
     createMissionTask('a5', 'legacy', 'p', 'main');
     void now;
   }

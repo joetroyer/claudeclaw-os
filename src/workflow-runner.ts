@@ -361,6 +361,8 @@ async function handleStageFailure(
     escalateTo,
     'workflow-escalation',
     8,
+    false,
+    false,
     'workflow',
     runId,
   );

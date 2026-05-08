@@ -16,6 +16,7 @@ import { runWarroomAvatarMigration } from './avatars.js';
 import { initOAuthHealthCheck } from './oauth-health.js';
 import { initOrchestrator } from './orchestrator.js';
 import { initScheduler } from './scheduler.js';
+import { initSkillRegistry } from './skill-registry.js';
 import { setTelegramConnected, setBotInfo } from './state.js';
 import { getVenvPython, killProcess } from './platform.js';
 import { startWorkflowDaemon } from './workflow-runner.js';
@@ -146,6 +147,16 @@ async function main(): Promise<void> {
   });
 
   initOrchestrator();
+
+  // Skill registry powers the War Room slash menu (/api/skills) and the
+  // skill-suggestion routing on inbound messages. Cheap to scan once at
+  // boot; tests don't run this so the dashboard endpoint must tolerate an
+  // uninitialized registry (returns []).
+  try {
+    initSkillRegistry();
+  } catch (err: any) {
+    logger.warn({ err: err?.message || err }, 'Skill registry init failed; continuing without');
+  }
 
   // Decay and consolidation run ONLY in the main process to prevent
   // multi-process over-decay (5x decay on simultaneous restart) and

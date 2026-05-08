@@ -164,6 +164,7 @@ import { WARROOM_ENABLED, WARROOM_PORT } from './config.js';
 import { logger } from './logger.js';
 import { getTelegramConnected, getBotInfo, chatEvents, getIsProcessing, abortActiveQuery, ChatEvent } from './state.js';
 import { killProcess, isProcessAlive, findProcessesByPattern } from './platform.js';
+import { getAllSkills } from './skill-registry.js';
 
 // Slice 2 webhook helpers. Used by /api/watchers/webhook/:slug to pick a
 // small allowlist of headers (no auth/cookie data) and to extract the
@@ -2498,6 +2499,33 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       botUsername: info.username || '',
       pid: process.pid,
       chatId: chatId || null,
+    });
+  });
+
+  // ── Skill discovery ───────────────────────────────────────────────────
+  //
+  // Powers the War Room slash menu (/warroom/text). The frontend fetches
+  // this on page load and merges the skills below the orchestration
+  // commands so users get the same UX as Claude Code's slash menu.
+  //
+  // The registry is initialized once at boot from index.ts. If init never
+  // ran (tests, partial bring-up), getAllSkills() returns an empty array
+  // and we surface that as 200 [] rather than 500 — the popup stays
+  // functional with just the orchestration commands.
+  app.get('/api/skills', (c) => {
+    let skills: ReturnType<typeof getAllSkills>;
+    try {
+      skills = getAllSkills();
+    } catch {
+      skills = [];
+    }
+    return c.json({
+      skills: skills.map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: (s.description || '').slice(0, 120),
+        source: s.source,
+      })),
     });
   });
 

@@ -814,6 +814,30 @@ export function getWarRoomTextHtml(token: string, chatId: string, meetingId: str
   }
   .slash-item .s-label { font-size: 12px; color: var(--text-mute); line-height: 1.3; min-width: 0; }
   .slash-item.local .s-cmd { color: #a5b4fc; }
+  /* Source pill — distinguishes project-local skills (accent) from global
+     ~/.claude/skills (muted). Project skills win when both exist; the
+     pill makes the precedence visible at a glance. */
+  .slash-item .s-pill {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    font-weight: 700;
+    border-radius: 4px;
+    vertical-align: middle;
+    text-transform: uppercase;
+  }
+  .slash-item .s-pill.proj { background: var(--indigo-soft); color: #c7d2fe; border: 1px solid rgba(99,102,241,0.5); }
+  .slash-item .s-pill.global { background: rgba(255,255,255,0.04); color: var(--text-mute); border: 1px solid var(--border); }
+  /* Divider between orchestration commands and skills — visual break so
+     users perceive the two groups as distinct lists. */
+  .slash-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 6px 4px;
+  }
 
   /* "Commands" button next to Send — discoverability for users who
      don't know slash commands exist. Clicking pops the same list as
@@ -1042,7 +1066,7 @@ export function getWarRoomTextHtml(token: string, chatId: string, meetingId: str
         aria-controls="mention-popup slash-popup"
         autofocus></textarea>
       <div class="actions">
-        <button type="button" class="commands-btn" id="btn-commands" aria-haspopup="listbox" aria-controls="slash-popup" aria-expanded="false" title="Show slash commands">/ Commands</button>
+        <button type="button" class="commands-btn" id="btn-commands" aria-haspopup="listbox" aria-controls="slash-popup" aria-expanded="false" title="Show slash commands">/ Commands · 6</button>
         <button type="button" class="stop" id="btn-stop" aria-label="Stop current turn">Stop</button>
         <button type="submit" class="send" id="btn-send" disabled>Send</button>
       </div>
@@ -2501,14 +2525,55 @@ let mentionToken = '';  // the @query text we're matching against
 // persistent Commands-button popover. Server-side commands (standup,
 // discuss) round-trip to the orchestrator. Local commands (pin, unpin,
 // clear, end) are intercepted client-side in handleSlashCommand().
-const SLASH_COMMANDS = [
-  { name: 'standup', arg: true,  placeholder: '[@agent ...]', label: 'Each agent reports — add @-mentions to pick who runs' },
-  { name: 'discuss', arg: true,  placeholder: '[@agent ...] <topic>', label: 'Open discussion — add @-mentions to pick who weighs in' },
-  { name: 'pin',     arg: true,  placeholder: '<agent>', label: 'Pin one agent so they lead every reply', local: true },
-  { name: 'unpin',   arg: false, label: 'Release the pinned agent', local: true },
-  { name: 'clear',   arg: false, label: 'Reset agents\\' sessions for this meeting', local: true },
-  { name: 'end',     arg: false, label: 'End the meeting', local: true },
+//
+// kind='orch' = orchestration (standup/discuss/pin/unpin/clear/end).
+// kind='skill' = a discoverable skill registered in the SkillRegistry; on
+// Enter the composer text is sent as a normal message and the agent's
+// Claude side handles the /<skill> invocation. Skills are appended at
+// page-load via fetchSkills() below.
+const ORCH_COMMANDS = [
+  { name: 'standup', arg: true,  placeholder: '[@agent ...]', label: 'Each agent reports — add @-mentions to pick who runs', kind: 'orch' },
+  { name: 'discuss', arg: true,  placeholder: '[@agent ...] <topic>', label: 'Open discussion — add @-mentions to pick who weighs in', kind: 'orch' },
+  { name: 'pin',     arg: true,  placeholder: '<agent>', label: 'Pin one agent so they lead every reply', local: true, kind: 'orch' },
+  { name: 'unpin',   arg: false, label: 'Release the pinned agent', local: true, kind: 'orch' },
+  { name: 'clear',   arg: false, label: 'Reset agents\\' sessions for this meeting', local: true, kind: 'orch' },
+  { name: 'end',     arg: false, label: 'End the meeting', local: true, kind: 'orch' },
 ];
+let SKILL_COMMANDS = []; // populated by fetchSkills() at boot
+function SLASH_COMMANDS() { return ORCH_COMMANDS.concat(SKILL_COMMANDS); }
+
+async function fetchSkills() {
+  try {
+    const res = await fetch(API + '/api/skills' + Q);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || !Array.isArray(data.skills)) return;
+    // Sort: project first, then global; alphabetical within each group.
+    const sorted = data.skills.slice().sort((a, b) => {
+      if (a.source !== b.source) return a.source === 'project' ? -1 : 1;
+      return String(a.id).localeCompare(String(b.id));
+    });
+    SKILL_COMMANDS = sorted.map((s) => ({
+      name: s.id,
+      arg: true,
+      placeholder: '<args>',
+      // Truncated by server to 120 chars; clamp again for popup width.
+      label: (s.description || '').slice(0, 90),
+      source: s.source,
+      kind: 'skill',
+      local: false,
+    }));
+    updateCommandsBtnLabel();
+  } catch {
+    // Silently fall back to orchestration-only commands.
+  }
+}
+
+function updateCommandsBtnLabel() {
+  if (!commandsBtnEl) return;
+  const total = ORCH_COMMANDS.length + SKILL_COMMANDS.length;
+  commandsBtnEl.textContent = '/ Commands · ' + total;
+}
 
 const slashPopupEl = document.getElementById('slash-popup');
 const commandsBtnEl = document.getElementById('btn-commands');
@@ -2518,7 +2583,8 @@ let slashPersistent = false; // true when opened by the Commands button (no auto
 
 function slashFilter(query) {
   const q = (query || '').toLowerCase();
-  return SLASH_COMMANDS.filter((c) => !q || c.name.startsWith(q));
+  const all = SLASH_COMMANDS();
+  return all.filter((c) => !q || c.name.toLowerCase().startsWith(q));
 }
 
 function renderSlashPopup() {
@@ -2527,7 +2593,17 @@ function renderSlashPopup() {
   hint.className = 'mention-hint';
   hint.textContent = slashPersistent ? 'slash commands' : 'matching /';
   slashPopupEl.appendChild(hint);
+  let lastKind = null;
   slashMatches.forEach((c, i) => {
+    // Insert a divider between the orchestration block and the skills block
+    // when both kinds appear in the current matches.
+    if (lastKind && lastKind !== c.kind) {
+      const div = document.createElement('div');
+      div.className = 'slash-divider';
+      div.setAttribute('role', 'separator');
+      slashPopupEl.appendChild(div);
+    }
+    lastKind = c.kind;
     const row = document.createElement('div');
     row.className = 'slash-item' + (c.local ? ' local' : '') + (i === slashIndex ? ' active' : '');
     row.setAttribute('role', 'option');
@@ -2541,6 +2617,12 @@ function renderSlashPopup() {
       arg.className = 's-arg';
       arg.textContent = ' ' + (c.placeholder || '<arg>');
       cmd.appendChild(arg);
+    }
+    if (c.kind === 'skill' && c.source) {
+      const pill = document.createElement('span');
+      pill.className = 's-pill ' + (c.source === 'project' ? 'proj' : 'global');
+      pill.textContent = c.source === 'project' ? 'PROJ' : 'GLOBAL';
+      cmd.appendChild(pill);
     }
     const label = document.createElement('div');
     label.className = 's-label';
@@ -2574,7 +2656,7 @@ function updateSlashPopup() {
 
 function openSlashPopupPersistent() {
   slashPersistent = true;
-  slashMatches = SLASH_COMMANDS.slice();
+  slashMatches = SLASH_COMMANDS();
   slashIndex = 0;
   renderSlashPopup();
 }
@@ -3242,6 +3324,9 @@ async function loadHistoryThenConnect() {
 }
 
 loadHistoryThenConnect();
+// Load skills in parallel — non-blocking so the popup is enriched as soon
+// as the registry endpoint responds, but the page never waits on it.
+fetchSkills();
 </script>
 </body>
 </html>`;

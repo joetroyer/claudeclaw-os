@@ -13,6 +13,7 @@ export interface SkillMeta {
   description: string;  // first paragraph or frontmatter description
   triggerWords: string[]; // from frontmatter 'triggers:' field or derived from name
   fullPath: string;     // absolute path to SKILL.md
+  source: 'project' | 'global'; // which directory the skill was loaded from
 }
 
 // ── Internal state ──────────────────────────────────────────────────
@@ -143,7 +144,7 @@ function findSkillFile(dir: string): string | null {
   return null;
 }
 
-function scanDirectory(dir: string): void {
+function scanDirectory(dir: string, source: 'project' | 'global'): void {
   if (!fs.existsSync(dir)) return;
 
   let entries: fs.Dirent[];
@@ -182,6 +183,7 @@ function scanDirectory(dir: string): void {
       description,
       triggerWords,
       fullPath: skillFile,
+      source,
     };
 
     // Don't overwrite if already registered (project skills take priority)
@@ -221,8 +223,8 @@ export function initSkillRegistry(projectRootOverride?: string): void {
   const globalSkillsDir = path.join(os.homedir(), '.claude', 'skills');
 
   // Scan project skills first (they take priority)
-  scanDirectory(projectSkillsDir);
-  scanDirectory(globalSkillsDir);
+  scanDirectory(projectSkillsDir, 'project');
+  scanDirectory(globalSkillsDir, 'global');
 
   logger.info({ count: skills.size }, 'Skill registry initialized');
 }

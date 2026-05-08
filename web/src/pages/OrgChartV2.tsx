@@ -569,18 +569,19 @@ export function OrgChartV2() {
 
       {!loading && !error && roots.length > 0 && (
         <div
-          class="flex-1 overflow-y-auto p-4 sm:p-6"
+          class="flex-1 overflow-y-auto org-chart-canvas-scroll p-3 sm:p-4"
           onClick={(e) => {
             // Click on the empty background (not on a card) exits focus.
             if (e.target === e.currentTarget && focusId) exitFocus();
           }}
           data-testid="org-chart-v2-canvas"
         >
-          {/* Center the tree in a max-width column so cards don't sprawl
-              across ultra-wide displays. The tree itself is left-aligned
-              within this column. */}
-          <div class="mx-auto max-w-[1200px]">
-            <div class="space-y-3">
+          {/* Slice 10 Wave 4 — horizontal sibling layout. The tree fans
+              out wide; we let the canvas grow as wide as it needs and
+              scroll horizontally for big rows rather than wrapping
+              (wrapping breaks the connector-bus visualization). */}
+          <div class="inline-flex flex-col items-center min-w-full">
+            <div class="flex flex-row items-start justify-center gap-6">
               {rootsToRender().map((r) => (
                 <NodeBranch
                   key={r.id}
@@ -864,8 +865,12 @@ function NodeBranch(p: BranchProps) {
   })();
   const highlighted = !!p.matchSet?.has(p.node.id);
 
+  // Slice 10 Wave 4 — horizontal sibling layout. Each subtree is a
+  // flex column: parent card on top, a short vertical trunk, then a
+  // flex row of children. The pseudo-elements on .org-chart-child draw
+  // the horizontal bus + short verticals down to each child card.
   return (
-    <div class="org-chart-branch">
+    <div class="org-chart-subtree">
       <NodeCard
         node={p.node}
         isOpen={isOpen}
@@ -882,16 +887,19 @@ function NodeBranch(p: BranchProps) {
         onMenu={p.onMenu}
       />
       {isOpen && hasChildren && (
-        <div
-          class="org-chart-children mt-2 ml-5 sm:ml-7 space-y-3"
-          data-testid={`org-chart-v2-children-${p.node.id}`}
-        >
-          {p.node.children.map((c) => (
-            <div key={c.id} class="org-chart-child-rail">
-              <NodeBranch {...p} node={c} />
-            </div>
-          ))}
-        </div>
+        <>
+          <div class="org-chart-trunk" aria-hidden="true" />
+          <div
+            class="org-chart-children-row"
+            data-testid={`org-chart-v2-children-${p.node.id}`}
+          >
+            {p.node.children.map((c) => (
+              <div key={c.id} class="org-chart-child">
+                <NodeBranch {...p} node={c} />
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

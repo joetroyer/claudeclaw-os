@@ -26,8 +26,18 @@ import yaml from 'js-yaml';
 import { PROJECT_ROOT, ALLOWED_CHAT_ID, activeBotToken } from './config.js';
 import { logger } from './logger.js';
 import Database from 'better-sqlite3';
+import { lookupN8nWorkflowOwner } from './db.js';
 
+// Resolved at call time so tests can override via CLAUDECLAW_STORE_DB_PATH
+// (Slice 4 contract tests). Production: always falls back to the canonical
+// store path under PROJECT_ROOT. No production code path reads the env var.
+function storeDbPath(): string {
+  return process.env.CLAUDECLAW_STORE_DB_PATH || path.join(PROJECT_ROOT, 'store', 'claudeclaw.db');
+}
+// Back-compat: keep the named const as a snapshot of the production value
+// so log lines / static reads still work for any caller that imported it.
 const STORE_DB_PATH = path.join(PROJECT_ROOT, 'store', 'claudeclaw.db');
+void STORE_DB_PATH;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -45,7 +55,29 @@ export type Action =
   // Slice 2: invoke a skill on an agent directly. Currently dispatches via
   // mission_tasks (skills run inside a mission turn) so we reuse the
   // existing mission worker rather than forking a parallel runtime.
-  | { 'run-skill': { agent: string; skill: string; title?: string; prompt?: string } };
+  | { 'run-skill': { agent: string; skill: string; title?: string; prompt?: string } }
+  // ── Slice 4: n8n auto-task routing ─────────────────────────────────
+  // Side-effect action: read `payload.<workflow_field>` and consult the
+  // n8n_workflow_owners table. Sets internal vars `_owner_agent` (string
+  // or empty), `_owner_found` (true|false), and `_n8n_debounced`
+  // (true|false). Subsequent `if-owned` / `if-unowned` actions consult
+  // these gates. Also computes a debounce key from
+  // workflow_id + error_signature and short-circuits if the same pair
+  // was processed within `debounce_sec` (default 60).
+  | { 'lookup-owner': { workflow_field?: string; signature_field?: string; debounce_sec?: number } }
+  // Conditional wrappers — the nested action list runs only if the prior
+  // `lookup-owner` matched the corresponding gate AND the pair was not
+  // debounced. Order matters: a YAML actions list must contain
+  // `lookup-owner` BEFORE any `if-owned` / `if-unowned`, or the gates
+  // default closed (skip).
+  | { 'if-owned': Action[] }
+  | { 'if-unowned': Action[] }
+  // Post a templated message to a Slack incoming-webhook URL. The webhook
+  // URL is read from env (`webhook_url_env` field, default
+  // `SLACK_WEBHOOK_URL`). Channel is optional and only honored if the
+  // webhook URL accepts a `channel` override; the template field
+  // supports {payload.x} substitutions like other actions.
+  | { 'send-slack': { template: string; channel?: string; webhook_url_env?: string } };
 
 interface LogTailWatcherCfg {
   name: string;
@@ -150,7 +182,7 @@ async function sendTelegram(text: string): Promise<void> {
 }
 
 function queueMission(agent: string, title: string, prompt: string, createdBy = 'watcher'): string {
-  const db = new Database(STORE_DB_PATH);
+  const db = new Database(storeDbPath());
   try {
     const id = `wat_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     db.prepare(
@@ -165,7 +197,7 @@ function queueMission(agent: string, title: string, prompt: string, createdBy = 
 }
 
 function markMeetStale(id: string): void {
-  const db = new Database(STORE_DB_PATH);
+  const db = new Database(storeDbPath());
   try {
     db.prepare(
       `UPDATE meet_sessions SET status='left', left_at=? WHERE id=? AND status='live'`,
@@ -173,6 +205,168 @@ function markMeetStale(id: string): void {
     logger.info({ id }, 'watcher: marked stale meet session as left');
   } finally {
     db.close();
+  }
+}
+
+// ── Slice 4: n8n routing helpers ─────────────────────────────────────
+
+/**
+ * In-memory debounce map for n8n error routing. Keyed by
+ * `<workflow_id>::<error_signature>`. Value is the unix-ms timestamp of
+ * the last fire. Same key fired within `debounce_sec` is treated as a
+ * duplicate and short-circuits the action chain.
+ *
+ * Process-local — a bot restart clears the map. That's acceptable for a
+ * 60s debounce window: even if the same error fires through a restart
+ * we'd at most double-queue one mission on rare crash-recovery, which
+ * the meta agent is built to triage. Persisting this would require a
+ * new table and a write per fire — way more cost than benefit.
+ */
+const N8N_DEBOUNCE = new Map<string, number>();
+const N8N_DEBOUNCE_MAX_ENTRIES = 1000; // bounded — purge oldest if exceeded
+
+function pruneDebounce(now: number): void {
+  if (N8N_DEBOUNCE.size <= N8N_DEBOUNCE_MAX_ENTRIES) return;
+  // Drop entries older than 5 minutes (well past any 60s debounce window).
+  for (const [k, t] of N8N_DEBOUNCE) {
+    if (now - t > 5 * 60 * 1000) N8N_DEBOUNCE.delete(k);
+  }
+  // Still over? drop oldest by insertion order (Map preserves it).
+  if (N8N_DEBOUNCE.size > N8N_DEBOUNCE_MAX_ENTRIES) {
+    const overflow = N8N_DEBOUNCE.size - N8N_DEBOUNCE_MAX_ENTRIES;
+    let i = 0;
+    for (const k of N8N_DEBOUNCE.keys()) {
+      if (i++ >= overflow) break;
+      N8N_DEBOUNCE.delete(k);
+    }
+  }
+}
+
+/** @internal — exposed for tests. Resets the debounce cache. */
+export function _resetN8nDebounceForTests(): void {
+  N8N_DEBOUNCE.clear();
+}
+
+/**
+ * Compute a stable signature for an error string. If the payload already
+ * contains an explicit signature/fingerprint field, use that verbatim;
+ * otherwise hash the error message (first 500 chars) so cosmetic noise
+ * like timestamps doesn't break debounce.
+ */
+function computeErrorSignature(raw: unknown): string {
+  if (typeof raw !== 'string' || !raw) return '';
+  const trimmed = raw.slice(0, 500);
+  // Lightweight FNV-1a — no need for crypto strength; we only want
+  // deterministic equivalence for identical error text.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < trimmed.length; i++) {
+    h ^= trimmed.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16);
+}
+
+interface N8nLookupResult {
+  ownerAgent: string | null;
+  ownerFound: boolean;
+  debounced: boolean;
+  workflowId: string;
+  errorSignature: string;
+}
+
+function performN8nLookup(
+  vars: Record<string, unknown>,
+  cfg: { workflow_field?: string; signature_field?: string; debounce_sec?: number },
+): N8nLookupResult {
+  const workflowField = cfg.workflow_field || 'workflow_id';
+  const signatureField = cfg.signature_field || 'error_signature';
+  const debounceMs = (cfg.debounce_sec ?? 60) * 1000;
+
+  // Read fields out of the payload object (preferred) or top-level vars
+  // (fallback) so a flat payload like `{workflow_id: ...}` also works.
+  const payload = (vars.payload && typeof vars.payload === 'object')
+    ? vars.payload as Record<string, unknown>
+    : {};
+
+  const readField = (name: string): string => {
+    const fromPayload = payload[name];
+    if (typeof fromPayload === 'string' || typeof fromPayload === 'number') return String(fromPayload);
+    const fromVars = vars[name];
+    if (typeof fromVars === 'string' || typeof fromVars === 'number') return String(fromVars);
+    return '';
+  };
+
+  const workflowId = readField(workflowField);
+  // Try the explicit signature field first (e.g. n8n's `errorSignature`,
+  // `fingerprint`, or `error_id`). Fall back to hashing the error message.
+  let errorSignature = readField(signatureField);
+  if (!errorSignature) {
+    const errMsg = readField('error_message') || readField('error') || '';
+    errorSignature = computeErrorSignature(errMsg) || readField('execution_id') || '';
+  }
+
+  // Use the shared db helper so this respects the same singleton
+  // connection as the rest of the runtime (and the in-memory test DB
+  // used by `_initTestDatabase`). Returns null on missing/empty input.
+  let ownerAgent: string | null = null;
+  if (workflowId) {
+    try {
+      ownerAgent = lookupN8nWorkflowOwner(workflowId);
+    } catch (err) {
+      logger.warn({ err, workflowId }, 'watcher: n8n owner lookup failed');
+    }
+  }
+
+  // Debounce decision: same workflow_id + error_signature within window.
+  // If either field is empty, we still debounce on the (workflow_id, '')
+  // pair so a flood of identical-no-signature errors collapses; but a
+  // missing workflow_id disables debounce (every unknown firing must
+  // reach meta).
+  let debounced = false;
+  if (workflowId) {
+    const key = `${workflowId}::${errorSignature}`;
+    const now = Date.now();
+    const last = N8N_DEBOUNCE.get(key);
+    if (last !== undefined && now - last < debounceMs) {
+      debounced = true;
+    } else {
+      N8N_DEBOUNCE.set(key, now);
+      pruneDebounce(now);
+    }
+  }
+
+  return { ownerAgent, ownerFound: !!ownerAgent, debounced, workflowId, errorSignature };
+}
+
+/**
+ * Post a Slack message via incoming-webhook URL read from env. Best-effort:
+ * a 4xx/5xx or thrown error is logged but does not abort the action chain.
+ * Avoids a hard dependency on Slack — if the env var is missing we log
+ * and skip so dev environments don't generate spurious failures.
+ */
+async function sendSlack(template: string, channel: string | undefined, webhookUrlEnv: string): Promise<boolean> {
+  const url = process.env[webhookUrlEnv];
+  if (!url) {
+    logger.warn({ webhookUrlEnv }, 'watcher: send-slack skipped (env var unset)');
+    return false;
+  }
+  try {
+    const body: Record<string, unknown> = { text: template };
+    if (channel) body.channel = channel;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      logger.warn({ status: res.status, body: txt.slice(0, 200) }, 'watcher: send-slack non-2xx');
+      return false;
+    }
+    return true;
+  } catch (err) {
+    logger.warn({ err }, 'watcher: send-slack failed');
+    return false;
   }
 }
 
@@ -197,7 +391,13 @@ export async function runActions(actions: Action[], vars: Record<string, unknown
         await sendTelegram(substitute(a['send-telegram'], vars));
       } else if ('queue-mission' in a) {
         const m = a['queue-mission'];
-        const id = queueMission(m.agent, substitute(m.title, vars), substitute(m.prompt, vars));
+        // Slice 4: agent is now also templated (e.g. `{_owner_agent}`) so
+        // routing decisions made by `lookup-owner` can flow into the
+        // queue. Pre-Slice-4 callers pass static agent strings; substitute()
+        // is a no-op on a string with no `{name}` patterns, so this is
+        // backwards compatible with all existing watcher entries.
+        const agent = substitute(m.agent, vars);
+        const id = queueMission(agent, substitute(m.title, vars), substitute(m.prompt, vars));
         queuedIds.push(id);
       } else if ('mark-meet-stale' in a) {
         const idField = a['mark-meet-stale'].id_field || 'id';
@@ -215,6 +415,50 @@ export async function runActions(actions: Action[], vars: Record<string, unknown
         const prompt = `[Triggered via webhook · skill=${m.skill}]\n\n${basePrompt}`;
         const id = queueMission(m.agent, title, prompt, 'watcher:webhook');
         queuedIds.push(id);
+      } else if ('lookup-owner' in a) {
+        // Slice 4: side-effect — populate vars._owner_agent / _owner_found /
+        // _n8n_debounced so subsequent if-owned / if-unowned can branch.
+        const cfg = a['lookup-owner'] || {};
+        const r = performN8nLookup(vars, cfg);
+        vars._owner_agent = r.ownerAgent ?? '';
+        vars._owner_found = r.ownerFound;
+        vars._n8n_debounced = r.debounced;
+        vars._workflow_id = r.workflowId;
+        vars._error_signature = r.errorSignature;
+        flat._owner_agent = r.ownerAgent ?? '';
+        flat.workflow_id = r.workflowId;
+        flat.error_signature = r.errorSignature;
+        if (r.debounced) {
+          logger.info(
+            { workflow_id: r.workflowId, error_signature: r.errorSignature },
+            'watcher: n8n debounce hit — skipping nested actions',
+          );
+        }
+      } else if ('if-owned' in a) {
+        // Gate: only run nested actions if the prior lookup-owner found
+        // an owner AND the event was not debounced. Defaults closed if
+        // no lookup-owner ran first.
+        if (vars._owner_found === true && vars._n8n_debounced !== true) {
+          const nested = a['if-owned'];
+          const nestedIds = await runActions(nested, vars);
+          queuedIds.push(...nestedIds);
+        }
+      } else if ('if-unowned' in a) {
+        if (vars._owner_found === false && vars._n8n_debounced !== true) {
+          const nested = a['if-unowned'];
+          const nestedIds = await runActions(nested, vars);
+          queuedIds.push(...nestedIds);
+        }
+      } else if ('send-slack' in a) {
+        // Slice 4: post to a Slack incoming-webhook URL. The webhook URL
+        // is configurable via env var (defaults to SLACK_WEBHOOK_URL) so
+        // multiple Slack endpoints (e.g. #ops vs #alerts) can be wired
+        // by referencing different env names per action.
+        const m = a['send-slack'];
+        const text = substitute(m.template, vars);
+        const channel = m.channel ? substitute(m.channel, vars) : undefined;
+        const envName = m.webhook_url_env || 'SLACK_WEBHOOK_URL';
+        await sendSlack(text, channel, envName);
       }
     } catch (err) {
       logger.warn({ err, action: Object.keys(a)[0] }, 'watcher: action failed');
@@ -304,7 +548,7 @@ function startSqlitePoll(cfg: SqlitePollWatcherCfg, cursors: Record<string, numb
   const intervalMs = cfg.interval_sec * 1000;
 
   async function tick(): Promise<void> {
-    const db = new Database(STORE_DB_PATH);
+    const db = new Database(storeDbPath());
     try {
       const lastSeen = cursors[cfg.name] ?? 0;
       // Allow {cursor} in the SQL — substitute the current cursor value

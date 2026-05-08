@@ -1,0 +1,37 @@
+=== Wave 0 dependency present (mission_tasks has source/source_id) ===
+sqlite> PRAGMA table_info(mission_tasks);
+0|id|TEXT|0||1
+1|title|TEXT|1||0
+2|prompt|TEXT|1||0
+3|assigned_agent|TEXT|0||0
+4|status|TEXT|1|'queued'|0
+5|result|TEXT|0||0
+6|error|TEXT|0||0
+7|created_by|TEXT|1|'dashboard'|0
+8|priority|INTEGER|1|0|0
+9|created_at|INTEGER|1||0
+10|started_at|INTEGER|0||0
+11|completed_at|INTEGER|0||0
+12|silent_start|INTEGER|1|0|0
+13|silent_result|INTEGER|1|0|0
+14|source|TEXT|0||0          <-- Wave 0
+15|source_id|TEXT|0||0       <-- Wave 0
+
+=== mission_tasks row count (pre, live) ===
+72
+
+=== Distinct sources (pre, live, pre-seed) ===
+NULL|72
+
+=== Worktree branch & HEAD ===
+branch: worktree-agent-af0823b5020a5817e
+head:   0774082 docs(readme): cloud deployment section (Railway/Fly/Render) (#49)
+status: pristine — no working tree changes
+
+=== Backend files we will NOT modify (pre) ===
+src/dashboard.ts        — owned by Wave 0
+src/db.ts               — owned by Wave 0
+src/scheduler.ts        — out of scope
+src/watchers.ts         — out of scope
+
+=== captured at 2026-05-08T15:23:37Z (pre-edit) ===

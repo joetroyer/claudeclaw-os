@@ -87,9 +87,9 @@ watchers:
             New WhatsApp from {contact_name}: "{body}"
 
             Draft a reply matching Joe's voice. If you're unsure of context or the right answer, ask Joe before sending. If it's a quick acknowledgment that obviously doesn't need approval, send via the whatsapp_send tool.
-  # Live broker pipeline (public.signals → ceddi-only). Bridge:
-  # supabase/functions/clawos-ceddi-bridge/. Default-priority signals; agent
-  # may escalate to high based on lab-query-channel-credibility.
+  # Live broker pipeline (public.signals → ceddi-only).
+  # Bridge: supabase/functions/clawos-ceddi-bridge/.
+  # Stance: HIGH-attention. Agent may escalate to Telegram ping.
   - name: trading-monitor-trigger
     type: webhook
     slug: trading-monitor
@@ -98,24 +98,41 @@ watchers:
     actions:
       - queue-mission:
           agent: trading-monitor
-          title: "Live trading signal: {payload.provider} {payload.side} {payload.entry}"
+          title: "Live signal: {payload.provider} {payload.side} {payload.entry}"
           prompt: |
-            Live trading signal from the broker dispatch pipeline (public.signals).
+            LIVE signal from the broker dispatch pipeline (public.signals).
+            Source = ceddi (the only kind that writes here).
 
-            Provider: {payload.provider}
-            Side: {payload.side}  Entry: {payload.entry}  SL: {payload.sl}  TP: {payload.tp}
-            Status: {payload.status}  Signal type: {payload.signal_type}
-            DB event: {payload.db_event}
+            ── Payload ──────────────────────────────────────────
+            {payload_raw}
+            ─────────────────────────────────────────────────────
 
-            Raw: {payload.raw}
-            Full payload: {payload_raw}
+            Your job (per your CLAUDE.md):
 
-            Parse, classify priority, log to hive_mind, notify Joe via Telegram if priority=high. Do NOT trade. Do NOT send orders.
+            1. Parse: provider, side, instrument, entry, sl, tp[], status, signal_type.
+            2. Enrich (use the skills you have — judgment on which to call):
+               - lab-query-channel-credibility — does this provider's recent SL/TP
+                 accuracy justify high-priority treatment?
+               - lab-query-signal-performance  — provider's recent win rate / TP-hit rate.
+               - lab-query-drawdown-profile    — only if signal looks like it
+                 follows a streak.
+            3. Classify priority:
+               - high  → conviction signal from a credible provider (>70% credibility,
+                         clean entry, sane SL/TP). Telegram-notify Joe.
+               - medium → normal signal. Log only.
+               - low   → degenerate fields (missing SL, parser warnings, low-cred provider).
+            4. Log one structured row to hive_mind:
+               - action  = signal-received
+               - summary = "PROVIDER=… SIDE=… INST=… ENTRY=… SL=… TP=… PRIORITY=…"
+               - chat_id = 'system'
+            5. Reply with the tight bullet output described in your CLAUDE.md.
 
-  # Observation-only L1 ingest (analysis.signals_l1 → all ingest_only providers:
-  # GoldSignals.io VIP Intraday/Swing, Gold Scalping & Zones, plus future
-  # ingest_only providers). Bridge: supabase/functions/clawos-ingest-bridge/.
-  # Log to hive_mind only — NEVER ping Joe on Telegram from this path.
+            Hard rules: never trade, never send orders, never DM the source channel.
+
+  # Observation-only L1 ingest (analysis.signals_l1).
+  # Currently 4 providers: ceddi (shadow), gold_scalping, goldsignals_swing,
+  # goldsignals_intraday. Bridge: supabase/functions/clawos-ingest-bridge/.
+  # Stance: SILENT. Log only. Never escalate to Telegram from this path.
   - name: trading-monitor-ingest
     type: webhook
     slug: trading-monitor-ingest
@@ -124,23 +141,30 @@ watchers:
     actions:
       - queue-mission:
           agent: trading-monitor
-          title: "Ingest signal: {payload.provider} {payload.side} {payload.entry}"
+          title: "Ingest: {payload.provider} {payload.side} {payload.entry}"
           prompt: |
             OBSERVATION-ONLY ingest signal from analysis.signals_l1.
+            Source = one of: gold_scalping | goldsignals_swing | goldsignals_intraday | ceddi (shadow row).
 
-            Provider: {payload.provider}
-            Side: {payload.side}  Entry: {payload.entry}  SL: {payload.sl}  TP: {payload.tp}
-            Posted at: {payload.posted_at}  Source channel: {payload.source_channel_id}
-            Buy-now: {payload.is_buy_now}  Split message: {payload.is_split_message}
-            Parser warnings: {payload.parser_warnings}
+            ── Payload ──────────────────────────────────────────
+            {payload_raw}
+            ─────────────────────────────────────────────────────
 
-            Raw: {payload.raw}
-            Full payload: {payload_raw}
+            Your job (per your CLAUDE.md):
 
-            Log to hive_mind. **Never** ping Joe via Telegram from this path —
-            ingest signals are observation-only. Run lab-query-channel-credibility
-            if you want to enrich the log entry with provider credibility data.
-            Do NOT trade. Do NOT send orders.
+            1. Parse the L1 fields (provider, side, entry_low/high/mid, sl, tp_levels,
+               is_buy_now, is_split_message, parser_warnings, raw_text).
+            2. Log one structured row to hive_mind:
+               - action  = ingest-signal
+               - summary = "PROVIDER=… SIDE=… ENTRY=… SL=… TP=… BUY_NOW=… WARN=…"
+               - chat_id = 'system'
+            3. Reply with a single-line summary. Don't run lab-query skills unless
+               something looks broken (parser_warnings non-empty, missing SL, etc.) —
+               we're aggregating these into a daily/weekly view, not reacting per signal.
+
+            Hard rules: NEVER notify Joe via Telegram from this path. NEVER trade.
+            NEVER send orders. NEVER DM the source channel. Pure observation, log
+            structured, move on.
 
   - name: n8n-error-router
     type: webhook

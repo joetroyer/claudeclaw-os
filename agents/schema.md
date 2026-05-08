@@ -44,6 +44,19 @@ All Slice-1 fields are **optional**. The migration script appends them with empt
 | `skills.primary` | string[] | 1 | Highlighted skills the agent leans on. **Hint, not allowlist** — agents still have access to every global skill. |
 | `avatar` | string | 1 | Path or URL to the agent's avatar. Populated by Slice 7 persona generator. |
 
+## Slice 10 additions (Wave 0 — `org-chart-v2`)
+
+Two new top-level fields land Slice 10's "AI-as-head" org-chart model. Spec reference: the Obsidian note `LinkedIn — I Have 150 AI Employees (Org Chart Tour).md` (key idea: AI nodes can occupy ANY tier — heads, directors, ICs — not just leaves). The new `GET /api/org-chart-v2` endpoint reads both fields. Existing Slice 3 endpoints under `/api/org-chart/*` stay on the original shape and ignore these fields.
+
+| Field | Type | Slice | Description |
+|---|---|---|---|
+| `type` | string | 10 | `"ai"` or `"human"`. Drives the OrgChartV2 card badge (color + icon). All current `agent.yaml` entries are `"ai"`; humans live in `humans.yaml` and pick up `"human"` from the same field there. |
+| `reports_to` | string | 10 | Id of the parent node (another agent id, or a human id from `humans.yaml`). Drives the OrgChartV2 edges. Empty string (or omitted) means "root" — only Joe should be root in production. AI nodes may occupy any tier (head, director, IC), so `reports_to` may point at another AI (e.g. `meta`), not just at a human. |
+
+Both fields are **optional** and default to empty (`""`). The migration script appends them with sensible defaults. Empty `type` is treated as `"ai"` by the org-chart-v2 reader for backwards compatibility; empty `reports_to` is treated as a root.
+
+`humans.yaml` also gains a `type: "human"` field per entry plus an optional `reports_to` field (Joe is root → `reports_to: ""`; Ali reports to Joe → `reports_to: "joe"`).
+
 ## Explicitly NOT in YAML
 
 These belong in `CLAUDE.md` as prose because they're persona instructions, not metadata:
@@ -67,3 +80,13 @@ tsx scripts/migrate-agent-schema.ts --dry-run      # report only
 ```
 
 The script is idempotent — it only appends keys that are missing. Existing key/value pairs and comments are left bit-identical because the script edits the raw text rather than round-tripping through `yaml.dump`.
+
+Run the Slice 10 Wave 0 migration to add `type` + `reports_to` to every agent and to humans.yaml:
+
+```bash
+tsx scripts/migrate-org-v2.ts                      # default <repo>
+tsx scripts/migrate-org-v2.ts --dry-run            # report only
+tsx scripts/migrate-org-v2.ts --root <path>        # custom repo root
+```
+
+Same idempotency contract as Slice 1: re-running adds nothing if the keys already exist, and existing key/value pairs and comments stay bit-identical.

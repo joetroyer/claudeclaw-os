@@ -19,6 +19,8 @@ humans:
       - course
       - personal
     owns_projects: []
+    type: "human"
+    reports_to: ""
 
   - id: ali
     name: Ali
@@ -26,3 +28,5 @@ humans:
     owns_lobs:
       - agency
     owns_projects: []
+    type: "human"
+    reports_to: "joe"

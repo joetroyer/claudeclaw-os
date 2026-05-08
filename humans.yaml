@@ -30,3 +30,87 @@ humans:
     owns_projects: []
     type: "human"
     reports_to: "joe"
+
+  - id: ali-abbas
+    name: Muhammad Ali Abbas
+    role: Agency team
+    owns_lobs: [agency]
+    owns_projects: []
+    type: "human"
+    reports_to: "ali"
+    email: "maliabbas2001@gmail.com"
+    timezone: "Asia/Karachi"
+    avatar: "/avatars/ali-abbas.jpg"
+    slack_id: "U08KR0M5J22"
+
+  - id: awab
+    name: Awab
+    role: Agency team
+    owns_lobs: [agency]
+    owns_projects: []
+    type: "human"
+    reports_to: "ali"
+    email: "awabsaghir@gmail.com"
+    timezone: "Asia/Karachi"
+    avatar: "/avatars/awab.jpg"
+    slack_id: "U0AHG2W7BNE"
+
+  - id: eduardo-trinidad
+    name: Eduardo Trinidad
+    role: Agency team
+    owns_lobs: [agency]
+    owns_projects: []
+    type: "human"
+    reports_to: "ali"
+    email: "eduardo.trinidad26@gmail.com"
+    timezone: "Asia/Manila"
+    avatar: "/avatars/eduardo-trinidad.jpg"
+    slack_id: "ULY4QKU3Z"
+
+  - id: july-sanchez
+    name: July Sanchez
+    role: Agency team
+    owns_lobs: [agency]
+    owns_projects: []
+    type: "human"
+    reports_to: "ali"
+    email: "vrtual2lingual@gmail.com"
+    timezone: "America/Caracas"
+    avatar: "/avatars/july-sanchez.jpg"
+    slack_id: "U04BJRFPZ7X"
+
+  - id: muhammad-tauseef
+    name: Muhammad Tauseef
+    role: Agency team
+    owns_lobs: [agency]
+    owns_projects: []
+    type: "human"
+    reports_to: "ali"
+    email: "muneeb.me@gmail.com"
+    timezone: "Asia/Karachi"
+    avatar: "/avatars/muhammad-tauseef.jpg"
+    slack_id: "U05DE93C7KR"
+
+  - id: nouman-khalil
+    name: Nouman Khalil
+    role: Agency team
+    owns_lobs: [agency]
+    owns_projects: []
+    type: "human"
+    reports_to: "ali"
+    email: "naumankhalil16@gmail.com"
+    timezone: "Asia/Karachi"
+    avatar: "/avatars/nouman-khalil.jpg"
+    slack_id: "U03Q5VCLZE0"
+
+  - id: ryan-claudio
+    name: Elmer Ryan Claudio
+    role: Agency team
+    owns_lobs: [agency]
+    owns_projects: []
+    type: "human"
+    reports_to: "ali"
+    email: "erclaudio777@gmail.com"
+    timezone: "Asia/Manila"
+    avatar: "/avatars/ryan-claudio.jpg"
+    slack_id: "UE1AB429H"

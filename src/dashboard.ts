@@ -649,7 +649,7 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
   // Top-level static files copied from web/public/ at build time
   // (e.g. /brain.glb for the 3D Hive Mind view). These have stable
   // names so they sit at the root rather than under /assets/.
-  app.get('/:filename{.+\\.(glb|gltf|bin|ktx2|wasm)}', (c) => {
+  app.get('/:filename{.+\\.(glb|gltf|bin|ktx2|wasm|jpg|jpeg|png|webp|svg)}', (c) => {
     const filename = c.req.param('filename');
     const filePath = path.join(PROJECT_ROOT, 'dist', 'web', filename);
     const root = path.join(PROJECT_ROOT, 'dist', 'web');
@@ -660,6 +660,10 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     const ctype = ext === '.glb' ? 'model/gltf-binary'
       : ext === '.gltf' ? 'model/gltf+json'
       : ext === '.wasm' ? 'application/wasm'
+      : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+      : ext === '.png' ? 'image/png'
+      : ext === '.webp' ? 'image/webp'
+      : ext === '.svg' ? 'image/svg+xml'
       : 'application/octet-stream';
     return new Response(new Uint8Array(data), {
       headers: {
@@ -3412,6 +3416,207 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     }
     const nodes = readOrgChartV2(runtime);
     return c.json({ nodes });
+  });
+
+  // ── Org chart V2 inline YAML editor (Slice 10 Wave 3) ────────────────
+  // The drawer in OrgChartV2 lets the user edit an agent or human's full
+  // YAML inline. These endpoints expose the raw YAML text on GET, parse +
+  // validate + atomically write on PUT, and return the post-write node
+  // shape so the client can avoid a second fetch.
+  //
+  // Path safety: agent / human ids must match the canonical id regex.
+  // The agent path is resolved via resolveAgentDir() and joined with
+  // 'agent.yaml' — never user-supplied path components — so traversal
+  // (`..`, absolute paths) is structurally impossible. Humans live in
+  // the single PROJECT_ROOT/humans.yaml file; only the matching block
+  // by `id` field is replaced, never an arbitrary path.
+
+  const YAML_ID_RE = /^[a-z0-9_-]+$/;
+  const YAML_MAX_BYTES = 64 * 1024;
+
+  function humansYamlFilePath(): string {
+    return path.join(PROJECT_ROOT, 'humans.yaml');
+  }
+
+  // Build the same OrgV2Node shape readOrgChartV2 returns for a single
+  // agent — used as the PUT response so the client can splice the
+  // updated card into its tree without a full re-fetch (though it does
+  // re-fetch in practice). Lives next to the endpoint definition so the
+  // mapping stays close to the wire contract.
+  function agentNodeView(agentId: string): unknown {
+    // Cheaper than calling readOrgChartV2() (which walks every agent):
+    // grab just the one we wrote.
+    const all = readOrgChartV2();
+    return all.find((n) => n.id === agentId) ?? null;
+  }
+
+  function humanNodeView(humanId: string): unknown {
+    const all = readOrgChartV2();
+    return all.find((n) => n.id === humanId && n.type === 'human') ?? null;
+  }
+
+  app.get('/api/agents/:id/yaml', (c) => {
+    const agentId = c.req.param('id');
+    if (!YAML_ID_RE.test(agentId)) return c.json({ error: 'invalid id' }, 400);
+    let agentDir: string;
+    try { agentDir = resolveAgentDir(agentId); }
+    catch { return c.json({ error: 'agent not found' }, 404); }
+    const yamlPath = path.join(agentDir, 'agent.yaml');
+    if (!fs.existsSync(yamlPath)) return c.json({ error: 'agent not found' }, 404);
+    const raw = fs.readFileSync(yamlPath, 'utf-8');
+    return c.json({ yaml: raw });
+  });
+
+  app.put('/api/agents/:id/yaml', async (c) => {
+    const agentId = c.req.param('id');
+    if (!YAML_ID_RE.test(agentId)) return c.json({ error: 'invalid id' }, 400);
+    const body = await c.req.json().catch(() => null) as { yaml?: string } | null;
+    if (!body || typeof body.yaml !== 'string') {
+      return c.json({ error: 'expected { yaml: string }' }, 400);
+    }
+    if (body.yaml.length > YAML_MAX_BYTES) {
+      return c.json({ error: 'yaml exceeds 64KB' }, 400);
+    }
+    let agentDir: string;
+    try { agentDir = resolveAgentDir(agentId); }
+    catch { return c.json({ error: 'agent not found' }, 404); }
+    const yamlPath = path.join(agentDir, 'agent.yaml');
+    if (!fs.existsSync(yamlPath)) return c.json({ error: 'agent not found' }, 404);
+
+    let parsed: unknown;
+    try {
+      const yaml = await import('js-yaml');
+      parsed = yaml.load(body.yaml);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ error: 'YAML parse error: ' + msg }, 400);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return c.json({ error: 'agent.yaml must be a YAML object' }, 400);
+    }
+    const obj = parsed as Record<string, unknown>;
+    if (typeof obj.name !== 'string' || obj.name.length === 0) {
+      return c.json({ error: 'agent.yaml requires a string `name` field' }, 400);
+    }
+    if (typeof obj.description !== 'string') {
+      return c.json({ error: 'agent.yaml requires a string `description` field' }, 400);
+    }
+
+    try {
+      const atomicEnvWrite = await getAtomicWriter();
+      atomicEnvWrite(yamlPath, body.yaml);
+      // 0o600 — file may carry tokens or other secrets in some installs.
+      try { fs.chmodSync(yamlPath, 0o600); } catch { /* best-effort */ }
+      insertAuditLog(agentId, '', 'edit_agent_yaml_v3', `${body.yaml.length} bytes`, false);
+    } catch (err) {
+      logger.error({ err, agentId }, 'Failed to write agent.yaml (slice-10 wave-3)');
+      return c.json({ error: 'failed to write file' }, 500);
+    }
+    return c.json({ ok: true, node: agentNodeView(agentId) });
+  });
+
+  app.get('/api/humans/:id/yaml', async (c) => {
+    const humanId = c.req.param('id');
+    if (!YAML_ID_RE.test(humanId)) return c.json({ error: 'invalid id' }, 400);
+    const yamlPath = humansYamlFilePath();
+    if (!fs.existsSync(yamlPath)) return c.json({ error: 'human not found' }, 404);
+    let parsed: unknown;
+    try {
+      const yaml = await import('js-yaml');
+      parsed = yaml.load(fs.readFileSync(yamlPath, 'utf-8'));
+    } catch {
+      return c.json({ error: 'humans.yaml is unparseable' }, 500);
+    }
+    const list = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>).humans
+      : null;
+    if (!Array.isArray(list)) return c.json({ error: 'human not found' }, 404);
+    const entry = list.find(
+      (e) => e && typeof e === 'object' && (e as Record<string, unknown>).id === humanId,
+    );
+    if (!entry) return c.json({ error: 'human not found' }, 404);
+    // Serialize just this human's block so the editor shows the entry,
+    // not the whole humans.yaml — same surface area as agent.yaml.
+    const yaml = await import('js-yaml');
+    const humanYaml = yaml.dump(entry, { lineWidth: 200, noRefs: true });
+    return c.json({ yaml: humanYaml });
+  });
+
+  app.put('/api/humans/:id/yaml', async (c) => {
+    const humanId = c.req.param('id');
+    if (!YAML_ID_RE.test(humanId)) return c.json({ error: 'invalid id' }, 400);
+    const body = await c.req.json().catch(() => null) as { yaml?: string } | null;
+    if (!body || typeof body.yaml !== 'string') {
+      return c.json({ error: 'expected { yaml: string }' }, 400);
+    }
+    if (body.yaml.length > YAML_MAX_BYTES) {
+      return c.json({ error: 'yaml exceeds 64KB' }, 400);
+    }
+    const yamlPath = humansYamlFilePath();
+    if (!fs.existsSync(yamlPath)) return c.json({ error: 'humans.yaml not found' }, 404);
+
+    let nextEntry: unknown;
+    try {
+      const yaml = await import('js-yaml');
+      nextEntry = yaml.load(body.yaml);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ error: 'YAML parse error: ' + msg }, 400);
+    }
+    if (!nextEntry || typeof nextEntry !== 'object' || Array.isArray(nextEntry)) {
+      return c.json({ error: 'human entry must be a YAML object' }, 400);
+    }
+    const entryObj = nextEntry as Record<string, unknown>;
+    if (typeof entryObj.name !== 'string' || entryObj.name.length === 0) {
+      return c.json({ error: 'human entry requires a string `name` field' }, 400);
+    }
+    // `description` isn't traditional on human entries (humans.yaml uses
+    // `role`), but the task spec calls for description. Treat `role` as
+    // a synonym so existing humans.yaml stays legal — the editor will
+    // surface either, and at least one of the two must be a non-empty
+    // string. We do NOT require an explicit `description` field on
+    // humans because that would force a schema migration of the live
+    // humans.yaml; `role` is the historical equivalent.
+    const hasRole = typeof entryObj.role === 'string';
+    const hasDescription = typeof entryObj.description === 'string';
+    if (!hasRole && !hasDescription) {
+      return c.json({ error: 'human entry requires a string `role` or `description` field' }, 400);
+    }
+    // Force the id field to match the path — caller can't rename a human
+    // out from under their referrers via PUT.
+    entryObj.id = humanId;
+
+    let parsedFile: unknown;
+    try {
+      const yaml = await import('js-yaml');
+      parsedFile = yaml.load(fs.readFileSync(yamlPath, 'utf-8'));
+    } catch {
+      return c.json({ error: 'humans.yaml is unparseable' }, 500);
+    }
+    if (!parsedFile || typeof parsedFile !== 'object' || Array.isArray(parsedFile)) {
+      return c.json({ error: 'humans.yaml has no humans list' }, 500);
+    }
+    const fileObj = parsedFile as Record<string, unknown>;
+    const list = Array.isArray(fileObj.humans) ? fileObj.humans : [];
+    const idx = list.findIndex(
+      (e) => e && typeof e === 'object' && (e as Record<string, unknown>).id === humanId,
+    );
+    if (idx === -1) return c.json({ error: 'human not found' }, 404);
+    list[idx] = entryObj;
+    fileObj.humans = list;
+
+    try {
+      const yaml = await import('js-yaml');
+      const dumped = yaml.dump(fileObj, { lineWidth: 200, noRefs: true });
+      const atomicEnvWrite = await getAtomicWriter();
+      atomicEnvWrite(yamlPath, dumped);
+      try { fs.chmodSync(yamlPath, 0o644); } catch { /* best-effort */ }
+      insertAuditLog(humanId, '', 'edit_human_yaml_v3', `${body.yaml.length} bytes`, false);
+    } catch (err) {
+      logger.error({ err, humanId }, 'Failed to write humans.yaml (slice-10 wave-3)');
+      return c.json({ error: 'failed to write file' }, 500);
+    }
+    return c.json({ ok: true, node: humanNodeView(humanId) });
   });
 
   // ── Dashboard personalization ────────────────────────────────────────

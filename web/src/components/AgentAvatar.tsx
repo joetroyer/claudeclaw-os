@@ -9,6 +9,9 @@ interface Props {
   /** Bumped by callers (e.g. after avatar upload) to force the browser
    *  to refetch the image instead of serving from the 1h HTTP cache. */
   cacheBust?: number | string;
+  /** Explicit image URL override. When set, skips /api/agents/:id/avatar
+   *  entirely. Used for human nodes whose avatars live at /avatars/<id>.jpg. */
+  src?: string;
 }
 
 const FAILED_AVATARS = new Set<string>();
@@ -17,7 +20,7 @@ const FAILED_AVATARS = new Set<string>();
 // initials if the endpoint returns 204 (no Telegram avatar set) or 404.
 // Successful loads are cached in the browser; 204/404 are remembered in a
 // module-scoped Set so we don't re-fetch missing avatars within a session.
-export function AgentAvatar({ agentId, name, size = 36, running, cacheBust }: Props) {
+export function AgentAvatar({ agentId, name, size = 36, running, cacheBust, src }: Props) {
   const [imageOk, setImageOk] = useState(!FAILED_AVATARS.has(agentId));
   useEffect(() => { setImageOk(!FAILED_AVATARS.has(agentId)); }, [agentId]);
   // When cacheBust changes the FAILED set might be stale (a 204 from
@@ -59,9 +62,12 @@ export function AgentAvatar({ agentId, name, size = 36, running, cacheBust }: Pr
   }
 
   const cacheBustParam = cacheBust !== undefined ? `&v=${encodeURIComponent(String(cacheBust))}` : '';
+  const imageSrc = src
+    ? (cacheBust !== undefined ? `${src}${src.includes('?') ? '&' : '?'}v=${encodeURIComponent(String(cacheBust))}` : src)
+    : `/api/agents/${encodeURIComponent(agentId)}/avatar?token=${encodeURIComponent(dashboardToken)}${cacheBustParam}`;
   return (
     <img
-      src={`/api/agents/${encodeURIComponent(agentId)}/avatar?token=${encodeURIComponent(dashboardToken)}${cacheBustParam}`}
+      src={imageSrc}
       alt={name || agentId}
       class="rounded-full shrink-0 object-cover"
       style={{

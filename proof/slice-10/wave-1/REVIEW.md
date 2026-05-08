@@ -106,6 +106,22 @@ Patterns reused:
 - Inline hook style mirroring `useFetch`, `useDebouncedValue` rather than
   introducing a new lib file.
 
+## Final verdict — 2026-05-08
+
+- Overall verdict: APPROVED
+- F1 status (focus trap): RESOLVED. Existing resolution evidence remains in `web/src/pages/OrgChartV2.tsx:181-259` and Playwright coverage remains in `proof/slice-10/wave-1/playwright/wave-1.spec.ts:142-178`.
+- F2 status (semantic roles): RESOLVED. Existing resolution evidence remains in `web/src/pages/OrgChartV2.tsx:927-1049,1092-1101,1142-1148,1168-1175,1200-1217,1235-1239,1268-1274,1381-1424` and Playwright coverage remains in `proof/slice-10/wave-1/playwright/wave-1.spec.ts:129-140`.
+- F3 status (44px touch targets): RESOLVED on second-pass verification.
+  Source verification covered 24 listed interactive definitions in `web/src/pages/OrgChartV2.tsx`:
+  toolbar LOB select `text-[11px] px-3 py-2 min-h-[44px] min-w-[44px]` at `:700-707`, project select same class at `:715-722`, exit-focus button `inline-flex items-center ... min-h-[44px] min-w-[44px]` at `:729-738`;
+  card title `min-h-[44px] min-w-[44px] inline-flex items-center` at `:953-960`, subtitle `w-full min-h-[44px] min-w-[44px]` at `:981-988`, reports button `min-h-[44px] min-w-[44px] inline-flex items-center` at `:992-1003`, AI-reports button same class at `:1005-1017`, scheduled button same class at `:1019-1027`, triggered button same class at `:1028-1036`, overflow trigger `min-h-[44px] min-w-[44px] inline-flex items-center justify-center` at `:1041-1049`, and 6 overflow menu items via `MenuItem` class `w-full text-left flex items-center min-h-[44px] min-w-[44px]` at `:1092-1101`;
+  drawer parent reports-to button `min-h-[44px] min-w-[44px] inline-flex items-center` at `:1142-1148`, child report rows `w-full ... min-h-[44px] min-w-[44px]` at `:1235-1239`, skill chips `min-h-[44px] min-w-[44px] inline-flex items-center justify-center` at `:1168-1175`, LOB chip same `inline-flex items-center justify-center` class at `:1200-1206`, project chips same `inline-flex items-center justify-center` class at `:1212-1220`, OWNS scheduled-task buttons same class at `:1381-1388`, OWNS triggered-task buttons same class at `:1399-1407`, OWNS n8n links `inline-flex items-center min-h-[44px] min-w-[44px]` at `:1420-1427`, and editable DrawerSection header `min-h-[44px] min-w-[44px] inline-flex items-center` at `:1268-1274`.
+  For visually small chips, the bounding-box-preserving centering classes `inline-flex items-center justify-center` are present on skills `:1172`, LOB `:1203`, projects `:1217`, scheduled tasks `:1385`, and triggered tasks `:1404`.
+- F4 status (OWNS nesting): RESOLVED. Existing resolution evidence remains in `web/src/pages/OrgChartV2.tsx:1181-1187,1412-1429` and Playwright coverage remains in `proof/slice-10/wave-1/playwright/wave-1.spec.ts:275-290`.
+- tsc state: clean. `npx tsc --noEmit` from `/Volumes/4TB-990/dev/claude-clawos` exited `0` with no output on 2026-05-08.
+- Build state: clean. `cd /Volumes/4TB-990/dev/claude-clawos/web && npm run build` exited `0`; Vite emitted chunk-size warnings only, no errors.
+- Out-of-scope drift: zero. `git -C /Volumes/4TB-990/dev/claude-clawos diff 10634f0...HEAD -- src/`, `-- package.json package-lock.json`, and `-- 'web/src/pages/OrgChart.tsx'` each exited `0` and produced no output.
+
 ---
 
 # Original review (verbatim)

@@ -960,7 +960,7 @@ function NodeCard(p: CardProps) {
           class="shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center hover:opacity-90 transition-opacity"
           aria-label={`Open ${p.node.name} profile`}
         >
-          <AgentAvatar agentId={p.node.id} name={p.node.name} size={40} running={p.node.running ?? undefined} />
+          <AgentAvatar agentId={p.node.id} name={p.node.name} size={40} running={p.node.running ?? undefined} src={p.node.avatar || undefined} />
         </button>
 
         <div class="flex-1 min-w-0">
@@ -1195,7 +1195,7 @@ function NodeDrawer(p: DrawerProps) {
   return (
     <div class="px-6 py-4 space-y-5">
       <div class="flex items-start gap-3">
-        <AgentAvatar agentId={n.id} name={n.name} size={48} running={n.running ?? undefined} />
+        <AgentAvatar agentId={n.id} name={n.name} size={48} running={n.running ?? undefined} src={n.avatar || undefined} />
         <div class="min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
             <h3 class="text-[15px] font-semibold text-[var(--color-text)] truncate">{n.name}</h3>

@@ -18,7 +18,13 @@ export interface SkillMeta {
 
 // ── Internal state ──────────────────────────────────────────────────
 
-const skills: Map<string, SkillMeta> = new Map();
+let skills: Map<string, SkillMeta> = new Map();
+
+// Active fs.watch handles + debounce timer. Held at module scope so a
+// second initSkillRegistry() call (e.g. tests, hot reload) can tear the
+// previous watchers down before installing new ones.
+const activeWatchers: fs.FSWatcher[] = [];
+let rescanTimer: NodeJS.Timeout | null = null;
 
 // ── Frontmatter parsing ─────────────────────────────────────────────
 
@@ -144,7 +150,11 @@ function findSkillFile(dir: string): string | null {
   return null;
 }
 
-function scanDirectory(dir: string, source: 'project' | 'global'): void {
+function scanDirectoryInto(
+  dir: string,
+  source: 'project' | 'global',
+  target: Map<string, SkillMeta>,
+): void {
   if (!fs.existsSync(dir)) return;
 
   let entries: fs.Dirent[];
@@ -187,10 +197,105 @@ function scanDirectory(dir: string, source: 'project' | 'global'): void {
     };
 
     // Don't overwrite if already registered (project skills take priority)
-    if (!skills.has(meta.id)) {
-      skills.set(meta.id, meta);
+    if (!target.has(meta.id)) {
+      target.set(meta.id, meta);
     }
   }
+}
+
+/**
+ * Scan both skill roots into a fresh Map and atomically swap it in. Used
+ * by initSkillRegistry() and by the fs.watch debounce after a change.
+ */
+function rescanAll(projectSkillsDir: string, globalSkillsDir: string): void {
+  const next = new Map<string, SkillMeta>();
+  // Scan project skills first (they take priority).
+  scanDirectoryInto(projectSkillsDir, 'project', next);
+  scanDirectoryInto(globalSkillsDir, 'global', next);
+  // Atomic swap — no readers ever see a half-built map.
+  skills = next;
+}
+
+// ── File-system watchers ────────────────────────────────────────────
+
+function teardownWatchers(): void {
+  if (rescanTimer) {
+    clearTimeout(rescanTimer);
+    rescanTimer = null;
+  }
+  for (const w of activeWatchers) {
+    try { w.close(); } catch { /* already closed */ }
+  }
+  activeWatchers.length = 0;
+}
+
+/**
+ * Wire fs.watch on both skill roots so a newly added (or removed) SKILL.md
+ * appears in /api/skills without restarting the dashboard. Handles the
+ * common failure modes:
+ *   - Directory doesn't exist on this host (~/.claude/skills not present):
+ *     skip silently. We do NOT poll-create — boot stays cheap.
+ *   - Directory exists but isn't watchable (EACCES, EPERM, EBUSY): log a
+ *     warn and continue without that watcher.
+ *   - Recursive watch unsupported on the platform (very old Node, BSDs):
+ *     fall back to a non-recursive watch on the root only; new skill dirs
+ *     still trigger because their creation is a change in the parent.
+ */
+function installWatchers(projectSkillsDir: string, globalSkillsDir: string): void {
+  const targets: { dir: string; source: 'project' | 'global' }[] = [
+    { dir: projectSkillsDir, source: 'project' },
+    { dir: globalSkillsDir, source: 'global' },
+  ];
+
+  for (const { dir, source } of targets) {
+    if (!fs.existsSync(dir)) {
+      // Skip — no point watching a path that doesn't exist on this host.
+      // If the user creates ~/.claude/skills later they'll need to restart.
+      // That's an acceptable trade for not running a polling loop.
+      logger.debug({ dir, source }, 'Skill dir missing, watcher skipped');
+      continue;
+    }
+    let watcher: fs.FSWatcher;
+    try {
+      watcher = fs.watch(dir, { recursive: true }, () => {
+        scheduleRescan(projectSkillsDir, globalSkillsDir);
+      });
+    } catch (err: any) {
+      // ENOTSUP on some filesystems → retry without recursive.
+      try {
+        watcher = fs.watch(dir, () => {
+          scheduleRescan(projectSkillsDir, globalSkillsDir);
+        });
+      } catch (err2: any) {
+        logger.warn(
+          { dir, source, err: err2?.message || String(err2) },
+          'Could not install skill watcher',
+        );
+        continue;
+      }
+      logger.debug({ dir }, 'Skill watcher fell back to non-recursive');
+    }
+    watcher.on('error', (err) => {
+      logger.warn({ dir, err: err?.message || String(err) }, 'Skill watcher error');
+    });
+    activeWatchers.push(watcher);
+  }
+}
+
+function scheduleRescan(projectSkillsDir: string, globalSkillsDir: string): void {
+  if (rescanTimer) clearTimeout(rescanTimer);
+  // 500ms debounce: editors often emit several change events in quick
+  // succession (atomic write = unlink + rename), and a fresh skill being
+  // copied in trips dozens of inotify events as files settle.
+  rescanTimer = setTimeout(() => {
+    rescanTimer = null;
+    try {
+      rescanAll(projectSkillsDir, globalSkillsDir);
+      logger.info({ count: skills.size }, 'Skill registry rescanned after change');
+    } catch (err: any) {
+      logger.warn({ err: err?.message || String(err) }, 'Skill registry rescan failed');
+    }
+  }, 500);
 }
 
 // ── Public API ──────────────────────────────────────────────────────
@@ -206,7 +311,10 @@ function scanDirectory(dir: string, source: 'project' | 'global'): void {
  * so paths with spaces / parens / unicode resolve correctly).
  */
 export function initSkillRegistry(projectRootOverride?: string): void {
-  skills.clear();
+  // Tear down any prior watchers (e.g. test re-init) before installing new
+  // ones so we don't leak handles or fire stale callbacks.
+  teardownWatchers();
+  skills = new Map();
 
   // fileURLToPath decodes URL-encoded characters (e.g. %20 → space).
   // The previous implementation used `new URL(import.meta.url).pathname`
@@ -222,11 +330,25 @@ export function initSkillRegistry(projectRootOverride?: string): void {
   const projectSkillsDir = path.join(projectRoot, 'skills');
   const globalSkillsDir = path.join(os.homedir(), '.claude', 'skills');
 
-  // Scan project skills first (they take priority)
-  scanDirectory(projectSkillsDir, 'project');
-  scanDirectory(globalSkillsDir, 'global');
-
+  rescanAll(projectSkillsDir, globalSkillsDir);
   logger.info({ count: skills.size }, 'Skill registry initialized');
+
+  // Wire live reload. The watcher is best-effort — if it fails the registry
+  // still serves the initial scan, and the user can restart to refresh.
+  try {
+    installWatchers(projectSkillsDir, globalSkillsDir);
+  } catch (err: any) {
+    logger.warn({ err: err?.message || String(err) }, 'Skill watcher install failed');
+  }
+}
+
+/**
+ * Tear down filesystem watchers. Exposed for tests so vitest can stop
+ * pending timers between cases. Production code never calls this — the
+ * watchers live for the process lifetime.
+ */
+export function _stopSkillRegistryForTest(): void {
+  teardownWatchers();
 }
 
 /**

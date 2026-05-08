@@ -25,6 +25,8 @@ import { AgentAvatar } from '@/components/AgentAvatar';
 import { useFetch } from '@/lib/useFetch';
 import { useDebouncedValue } from '@/lib/useDebounce';
 import { pushToast } from '@/lib/toasts';
+import { apiGet, apiPut, ApiError } from '@/lib/api';
+import jsyaml from 'js-yaml';
 
 // ── types ────────────────────────────────────────────────────────────
 
@@ -290,8 +292,12 @@ function writeUrlState(focus: string | null, expand: string[] | null) {
 // ── page ─────────────────────────────────────────────────────────────
 
 export function OrgChartV2() {
-  const { data, loading, error } = useFetch<OrgChartV2Response>('/api/org-chart-v2', 60_000);
+  const { data, loading, error, refresh } = useFetch<OrgChartV2Response>('/api/org-chart-v2', 60_000);
   const [, navigate] = useLocation();
+  // Slice 10 Wave 3 — when a node id is in `editingYamlId`, the drawer
+  // body swaps to YamlEditorPanel for that node. Cleared on Save success
+  // (drawer closes too) or Cancel (returns to read-only drawer view).
+  const [editingYamlId, setEditingYamlId] = useState<string | null>(null);
 
   const nodes = data?.nodes ?? [];
   const { roots, byId } = useMemo(() => buildTree(nodes), [nodes]);
@@ -589,32 +595,49 @@ export function OrgChartV2() {
                   onTypeBadge={(t) => setTypeFilter(t)}
                   onScheduled={(id) => navigate(`/scheduled?agent=${encodeURIComponent(id)}`)}
                   onTriggered={(id) => navigate(`/triggered?agent=${encodeURIComponent(id)}`)}
-                  onMenu={{ copyLink, expandAllUnder, collapseSiblings, focus: enterFocus }}
+                  onMenu={{
+                    copyLink,
+                    expandAllUnder,
+                    collapseSiblings,
+                    focus: enterFocus,
+                    editYaml: (id: string) => { setDrawerId(id); setEditingYamlId(id); },
+                  }}
                 />
               ))}
             </div>
-          </div>
         </div>
       )}
 
       <Drawer
         open={drawerNode !== null}
-        onClose={() => setDrawerId(null)}
+        onClose={() => { setDrawerId(null); setEditingYamlId(null); }}
         title={drawerNode ? drawerNode.name : 'Details'}
       >
         {drawerNode && (
           <div ref={drawerContentRef} data-testid="org-chart-v2-drawer-content">
-            <NodeDrawer
-              node={drawerNode}
-              byId={byId}
-              onJumpTo={jumpTo}
-              onSkill={(slug) => navigate(`/skills/${encodeURIComponent(slug)}`)}
-              onScheduled={(slug) => navigate(`/scheduled?id=${encodeURIComponent(slug)}`)}
-              onTriggered={(slug) => navigate(`/triggered?slug=${encodeURIComponent(slug)}`)}
-              onLob={(lob) => { setLobFilter(lob); setDrawerId(null); }}
-              onProject={(p) => { setProjectFilter(p); setDrawerId(null); }}
-              onYamlEdit={() => pushToast({ tone: 'info', title: 'Edit YAML coming in Slice 10 Wave 2' })}
-            />
+            {editingYamlId === drawerNode.id ? (
+              <YamlEditorPanel
+                node={drawerNode}
+                onCancel={() => setEditingYamlId(null)}
+                onSaved={() => {
+                  setEditingYamlId(null);
+                  setDrawerId(null);
+                  refresh();
+                }}
+              />
+            ) : (
+              <NodeDrawer
+                node={drawerNode}
+                byId={byId}
+                onJumpTo={jumpTo}
+                onSkill={(slug) => navigate(`/skills/${encodeURIComponent(slug)}`)}
+                onScheduled={(slug) => navigate(`/scheduled?id=${encodeURIComponent(slug)}`)}
+                onTriggered={(slug) => navigate(`/triggered?slug=${encodeURIComponent(slug)}`)}
+                onLob={(lob) => { setLobFilter(lob); setDrawerId(null); }}
+                onProject={(p) => { setProjectFilter(p); setDrawerId(null); }}
+                onYamlEdit={() => setEditingYamlId(drawerNode.id)}
+              />
+            )}
           </div>
         )}
       </Drawer>
@@ -826,6 +849,7 @@ interface BranchProps {
     expandAllUnder: (id: string) => void;
     collapseSiblings: (id: string) => void;
     focus: (id: string) => void;
+    editYaml: (id: string) => void;
   };
 }
 
@@ -892,6 +916,7 @@ interface CardProps {
     expandAllUnder: (id: string) => void;
     collapseSiblings: (id: string) => void;
     focus: (id: string) => void;
+    editYaml: (id: string) => void;
   };
 }
 
@@ -1085,7 +1110,7 @@ function NodeCard(p: CardProps) {
                 label="Edit YAML…"
                 onClick={() => {
                   setMenuOpen(false);
-                  pushToast({ tone: 'info', title: 'Edit YAML coming in Slice 10 Wave 3' });
+                  p.onMenu.editYaml(p.node.id);
                 }}
               />
             </div>
@@ -1516,6 +1541,205 @@ function OwnsBlock({
               </span>
             ))}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── YAML editor panel (Slice 10 Wave 3) ───────────────────────────────
+//
+// Inline editor that replaces the drawer body when the user clicks
+// "Edit YAML" in the FOUR Rs section header (or the per-card menu's
+// "Edit YAML…" item). Fetches the agent or human's full YAML text via
+// /api/(agents|humans)/:id/yaml, exposes it in a plain <textarea>
+// (no Monaco — too heavy, and we want this to ship without new deps),
+// runs js-yaml.load() on every keystroke for a live valid/invalid
+// indicator, and PUTs the raw text on Save. On 200 the parent calls
+// refresh() on the org-chart fetch and closes the drawer; on error
+// the panel surfaces the message inline and keeps the user in edit
+// mode so the draft isn't lost.
+//
+// Path-safety lives on the server — this component happily sends any
+// id the parent gave it, and the dashboard handler validates the id
+// shape and resolves the file path itself.
+
+interface YamlEditorPanelProps {
+  node: TreeNode;
+  onCancel: () => void;
+  onSaved: () => void;
+}
+
+function YamlEditorPanel(p: YamlEditorPanelProps) {
+  const isHuman = p.node.type === 'human';
+  const endpoint = isHuman
+    ? `/api/humans/${encodeURIComponent(p.node.id)}/yaml`
+    : `/api/agents/${encodeURIComponent(p.node.id)}/yaml`;
+
+  // 'idle' on first paint while we fetch the current yaml. Once loaded
+  // we stay in 'editing'. 'saving' disables the buttons so a double-
+  // click can't race two PUTs.
+  const [phase, setPhase] = useState<'loading' | 'editing' | 'saving'>('loading');
+  const [text, setText] = useState<string>('');
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Cold load. Aborts cleanly if the user cancels before the GET resolves.
+  useEffect(() => {
+    let cancelled = false;
+    setPhase('loading');
+    setLoadError(null);
+    apiGet<{ yaml: string }>(endpoint)
+      .then((d) => {
+        if (cancelled) return;
+        setText(d.yaml ?? '');
+        setPhase('editing');
+        // Microtask so the textarea is mounted before we focus it —
+        // otherwise the drawer's focus trap steals focus on the next
+        // tick and the cursor never lands here.
+        requestAnimationFrame(() => textareaRef.current?.focus());
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const msg = err instanceof ApiError ? err.message : String(err);
+        setLoadError(msg);
+        setPhase('editing'); // surface a recoverable empty editor
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endpoint]);
+
+  // Parse-on-type for the live valid/invalid badge. Cheap — js-yaml
+  // tops out around a few thousand documents/second on a 64KB cap.
+  useEffect(() => {
+    if (phase === 'loading') return;
+    try {
+      const parsed = jsyaml.load(text);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        setParseError('Top-level must be a YAML object');
+        return;
+      }
+      setParseError(null);
+    } catch (err) {
+      setParseError(err instanceof Error ? err.message : String(err));
+    }
+  }, [text, phase]);
+
+  async function handleSave() {
+    if (parseError) return;
+    setPhase('saving');
+    setSaveError(null);
+    try {
+      await apiPut<{ ok: boolean }>(endpoint, { yaml: text });
+      pushToast({ tone: 'success', title: 'YAML saved' });
+      p.onSaved();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      setSaveError(msg);
+      setPhase('editing');
+      pushToast({ tone: 'error', title: 'Save failed', description: msg });
+    }
+  }
+
+  const canSave = phase === 'editing' && !parseError && !loadError;
+
+  return (
+    <div class="px-6 py-4 space-y-3" data-testid="org-chart-v2-yaml-editor">
+      <div class="flex items-start gap-3">
+        <AgentAvatar agentId={p.node.id} name={p.node.name} size={36} />
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2 flex-wrap">
+            <h3 class="text-[14px] font-semibold text-[var(--color-text)] truncate">
+              Edit YAML — {p.node.name}
+            </h3>
+            <Pill tone={isHuman ? 'neutral' : 'accent'}>
+              {isHuman ? 'humans.yaml' : 'agent.yaml'}
+            </Pill>
+          </div>
+          <div class="text-[11px] text-[var(--color-text-muted)] mt-0.5">
+            {isHuman
+              ? 'Edits this human\'s block in humans.yaml.'
+              : `Edits agents/${p.node.id}/agent.yaml. Takes effect on next agent restart.`}
+          </div>
+        </div>
+      </div>
+
+      {loadError && (
+        <div
+          class="rounded border border-[var(--color-danger,#b94a48)] bg-[var(--color-danger-soft,rgba(185,74,72,0.12))] px-3 py-2 text-[12px] text-[var(--color-danger,#b94a48)]"
+          data-testid="org-chart-v2-yaml-load-error"
+        >
+          Could not load yaml: {loadError}
+        </div>
+      )}
+
+      <textarea
+        ref={textareaRef}
+        value={text}
+        onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
+        spellcheck={false}
+        rows={20}
+        disabled={phase === 'loading' || phase === 'saving'}
+        class="w-full px-3 py-2 rounded bg-[var(--color-elevated)] border border-[var(--color-border)] text-[12px] font-mono text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+        placeholder={phase === 'loading' ? 'Loading…' : ''}
+        data-testid="org-chart-v2-yaml-textarea"
+      />
+
+      <div
+        class="flex items-center justify-between gap-2 text-[11px]"
+        data-testid="org-chart-v2-yaml-status"
+      >
+        <div class="min-w-0 flex-1">
+          {phase === 'loading' ? (
+            <span class="text-[var(--color-text-muted)]">Loading…</span>
+          ) : parseError ? (
+            <span
+              class="text-[var(--color-danger,#b94a48)] truncate inline-block max-w-full"
+              data-testid="org-chart-v2-yaml-parse-error"
+              title={parseError}
+            >
+              Invalid: {parseError}
+            </span>
+          ) : (
+            <span
+              class="text-[var(--color-success,#3aa863)]"
+              data-testid="org-chart-v2-yaml-parse-ok"
+            >
+              YAML valid
+            </span>
+          )}
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={p.onCancel}
+            disabled={phase === 'saving'}
+            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-3 py-2 text-[11px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-card)] transition-colors disabled:opacity-50"
+            data-testid="org-chart-v2-yaml-cancel"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!canSave}
+            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-3 py-2 text-[11px] rounded bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            data-testid="org-chart-v2-yaml-save"
+          >
+            {phase === 'saving' ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+
+      {saveError && (
+        <div
+          class="rounded border border-[var(--color-danger,#b94a48)] bg-[var(--color-danger-soft,rgba(185,74,72,0.12))] px-3 py-2 text-[12px] text-[var(--color-danger,#b94a48)]"
+          data-testid="org-chart-v2-yaml-save-error"
+        >
+          {saveError}
         </div>
       )}
     </div>

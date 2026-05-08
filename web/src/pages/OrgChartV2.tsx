@@ -405,7 +405,19 @@ export function OrgChartV2() {
       inner.style.marginLeft = `-${mx}px`;
       inner.style.marginRight = `-${mx}px`;
       inner.style.marginBottom = `-${mb}px`;
-      requestAnimationFrame(() => { canvas.scrollLeft = 0; });
+      // After scale + margin compensation, center the canvas's scroll
+      // on the topmost root (joe) so the founder is visible regardless
+      // of how the subtree skews left/right.
+      requestAnimationFrame(() => {
+        const rootId = roots[0]?.id;
+        if (!rootId) { canvas.scrollLeft = 0; return; }
+        const rootEl = canvas.querySelector(`[data-org-node-id="${CSS.escape(rootId)}"]`) as HTMLElement | null;
+        if (!rootEl) { canvas.scrollLeft = 0; return; }
+        const cR = canvas.getBoundingClientRect();
+        const rR = rootEl.getBoundingClientRect();
+        const rootCenter = rR.left + rR.width / 2 - cR.left + canvas.scrollLeft;
+        canvas.scrollLeft = Math.max(0, rootCenter - cR.width / 2);
+      });
     }
     // First paint after the children DOM has settled, then resize.
     const raf1 = requestAnimationFrame(recompute);

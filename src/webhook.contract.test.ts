@@ -240,7 +240,12 @@ describe('Slice 2 webhook list + read endpoints (auth-gated)', () => {
     expect(slugs).toContain('trading-monitor');
     expect(slugs).toContain('preview-only');
     const tm = j.watchers.find((w: any) => w.slug === 'trading-monitor');
-    expect(tm.webhook_url).toMatch(/\/api\/watchers\/webhook\/trading-monitor$/);
+    // Slice 9 Wave 0: the canonical public path moved from
+    // /api/watchers/webhook/<slug> to /api/hooks/<slug>. The legacy alias
+    // is still mounted server-side (see slice-9-activity.contract.test.ts)
+    // but the displayed webhook_url surface shows the new path so any new
+    // wiring lands on it.
+    expect(tm.webhook_url).toMatch(/\/api\/hooks\/trading-monitor$/);
   });
 
   it('returns last payloads for a slug', async () => {

@@ -133,6 +133,7 @@ import {
   createWebhookWatcher,
   updateWebhookWatcher,
   deleteWebhookWatcher,
+  loadAnyWatcher,
 } from './watchers.js';
 import { getIngestionQuotaStatus, extractViaClaude } from './memory-ingest.js';
 import { WARROOM_ENABLED, WARROOM_PORT } from './config.js';
@@ -1895,6 +1896,17 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
 
   app.delete('/api/watchers/:slug', (c) => {
     const slug = c.req.param('slug');
+    // Explicit type guard: log-tail and sqlite-poll watchers are
+    // operator-managed via watchers.yaml; refuse to delete them via API
+    // with a 403 instead of letting the webhook-only path return a
+    // misleading 404. Missing entries still 404 below.
+    const existing = loadAnyWatcher(slug);
+    if (existing && (existing.type === 'log-tail' || existing.type === 'sqlite-poll')) {
+      return c.json({
+        error: 'operator-managed',
+        message: 'log-tail and sqlite-poll watchers are managed in watchers.yaml directly. Edit the file by hand to add/remove these.',
+      }, 403);
+    }
     const result = deleteWebhookWatcher(slug);
     if (!result.ok) return c.json({ ok: false, error: result.error }, result.status as 400 | 404 | 409);
     insertAuditLog('main', 'dashboard', 'webhook_watcher_deleted',

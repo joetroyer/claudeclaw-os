@@ -514,6 +514,31 @@ export function listWebhookWatchers(): WebhookWatcherCfg[] {
   }
 }
 
+/**
+ * Look up a watcher by identifier across ALL types. Webhook watchers are
+ * matched by `slug`; log-tail and sqlite-poll watchers are matched by
+ * `name` (they have no slug field). Returns null if no entry matches.
+ *
+ * Used by DELETE /api/watchers/:slug to give an explicit 403 refusal
+ * when the target is operator-managed (log-tail / sqlite-poll) rather
+ * than letting the call fall through to a misleading 404.
+ */
+export function loadAnyWatcher(identifier: string): WatcherCfg | null {
+  try {
+    const cfgPath = path.join(PROJECT_ROOT, 'watchers.yaml');
+    if (!fs.existsSync(cfgPath)) return null;
+    const parsed = yaml.load(fs.readFileSync(cfgPath, 'utf-8')) as WatchersFile;
+    for (const w of parsed.watchers ?? []) {
+      if (w.type === 'webhook' && w.slug === identifier) return w;
+      if ((w.type === 'log-tail' || w.type === 'sqlite-poll') && w.name === identifier) return w;
+    }
+    return null;
+  } catch (err) {
+    logger.warn({ err, identifier }, 'watcher: failed to load watcher by identifier');
+    return null;
+  }
+}
+
 // ── Slice 8: Webhook watcher CRUD via dashboard ───────────────────────────────
 //
 // These helpers parse watchers.yaml, mutate the in-memory list, and write

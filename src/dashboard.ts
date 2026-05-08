@@ -345,7 +345,11 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
   //
   // The kill switch (DASHBOARD_MUTATIONS_ENABLED) is honored explicitly
   // here since we sit before the global mutation middleware.
-  app.post('/api/watchers/webhook/:slug', async (c) => {
+  // Slice 9 Wave 0: extracted into a named handler so we can mount it at
+  // both the new canonical path (/api/hooks/:slug) and the legacy alias
+  // (/api/watchers/webhook/:slug). The latter remains for in-flight
+  // integrations and can be deleted after every consumer cuts over.
+  const webhookIngressHandler = async (c: any): Promise<Response> => {
     const slug = c.req.param('slug');
     if (!slug || !/^[a-z0-9][a-z0-9-]{0,63}$/i.test(slug)) {
       return c.json({ error: 'invalid slug' }, 400);
@@ -433,13 +437,20 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       });
     }
 
-    const queuedIds = await runWatcherActions(watcher.actions, {
-      watcher: watcher.name,
-      slug,
-      mode,
-      payload,
-      payload_raw: rawBody,
-    });
+    const queuedIds = await runWatcherActions(
+      watcher.actions,
+      {
+        watcher: watcher.name,
+        slug,
+        mode,
+        payload,
+        payload_raw: rawBody,
+      },
+      // Slice 9 Wave 0: stamp every mission_task spawned by this webhook
+      // with source='webhook' and source_id=<watcher slug>. The Activity
+      // feed joins this back to watchers.yaml for a human label.
+      { source: 'webhook', source_id: slug },
+    );
 
     return c.json({
       ok: true,
@@ -447,7 +458,18 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       payload_id: payloadId,
       queued_mission_tasks: queuedIds,
     });
-  });
+  };
+
+  // New canonical public ingress path. The CF Access bypass app is
+  // configured for /api/hooks/* — a tighter, less ambiguous surface than
+  // the legacy /api/watchers/webhook/* (which read like an internal
+  // surface that should be authed).
+  app.post('/api/hooks/:slug', webhookIngressHandler);
+  // Legacy alias kept temporarily so in-flight integrations (Supabase
+  // bridges still configured for the old URL, third-party webhooks not
+  // yet rotated) don't break during the cutover. Out-of-scope for Wave 0
+  // is removing this; do that after every consumer is on /api/hooks.
+  app.post('/api/watchers/webhook/:slug', webhookIngressHandler);
 
   // Token auth middleware.
   //
@@ -1800,7 +1822,11 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
         secret_env: w.secret_env,
         secret_set: !!process.env[w.secret_env],
         actions: w.actions,
-        webhook_url: `${base}/api/watchers/webhook/${w.slug}`,
+        // Slice 9 Wave 0: the canonical public path is /api/hooks/<slug>.
+        // /api/watchers/webhook/<slug> still works (server-side alias) but
+        // we surface the new one in every UI/API response so new wiring
+        // lands on the right surface.
+        webhook_url: `${base}/api/hooks/${w.slug}`,
       })),
     });
   });
@@ -1819,7 +1845,7 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
         secret_env: w.secret_env,
         secret_set: !!process.env[w.secret_env],
         actions: w.actions,
-        webhook_url: `${base}/api/watchers/webhook/${w.slug}`,
+        webhook_url: `${base}/api/hooks/${w.slug}`,
       },
     });
   });

@@ -31,9 +31,15 @@
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
 
+// Slice 9 Wave 0: clawos public webhook surface moved from
+// /api/watchers/webhook/<slug> to /api/hooks/<slug>. The CF Access bypass
+// app is configured for /api/hooks/* — pointing the bridge at the legacy
+// alias would still work server-side, but the alias is on borrowed time
+// and any future CF Access tightening would fence it. New default lands
+// on the canonical path.
 const CLAWOS_WEBHOOK_URL =
   Deno.env.get('CLAWOS_WEBHOOK_URL') ||
-  'https://clawos.joetroyer.com/api/watchers/webhook/trading-monitor';
+  'https://clawos.joetroyer.com/api/hooks/trading-monitor';
 
 const SECRET = Deno.env.get('TRADING_MONITOR_SECRET') || '';
 

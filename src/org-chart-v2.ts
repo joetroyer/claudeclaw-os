@@ -133,7 +133,7 @@ function readHumanNodes(): OrgV2Node[] {
       },
       four_rs: { role: '', responsibilities: [], results: [], requirements: [] },
       personality: { tone: '', pushback: '', format: '' },
-      avatar: null,
+      avatar: typeof e['avatar'] === 'string' && e['avatar'] !== '' ? (e['avatar'] as string) : null,
       running: null,
       today_turns: null,
       scheduled_count: 0,

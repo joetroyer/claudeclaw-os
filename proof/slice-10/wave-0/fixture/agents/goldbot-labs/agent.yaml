@@ -1,0 +1,45 @@
+name: Gold Bot Labs
+description: "XAUUSD backtest & analysis agent — queries the lab DB, compares scenarios, surfaces what is working."
+
+# Token env name is scrubbed for the fixture — readOrgChartV2 doesn't read it.
+telegram_bot_token_env: FIXTURE_BOT_TOKEN
+
+model: claude-sonnet-4-6
+
+four_rs:
+  results: []
+
+owns:
+  scheduled_tasks: []
+  triggered_tasks: []
+  n8n_workflows: []
+  watchers: []
+
+lob: "goldbot"
+
+projects: []
+
+ideal: false
+
+platform: "claude"
+
+skills:
+  primary: []
+
+avatar: ""
+
+# ────────────────────────────────────────────────────────────────────
+# Slice 10 Wave 0 — Org Chart V2 (added by scripts/migrate-org-v2.ts).
+# Additive only. Drives the new /api/org-chart-v2 endpoint and the
+# OrgChartV2 page. The Slice 3 /api/org-chart/* endpoints ignore these.
+# ────────────────────────────────────────────────────────────────────
+
+# Slice 10: node type for the org chart — "ai" or "human".
+# Every agent.yaml is "ai"; humans live in humans.yaml.
+type: "ai"
+
+# Slice 10: id of the parent node on the org chart. Empty string (or
+# omitted) means "root" — only Joe should ever be root. AI nodes may
+# occupy any tier, so this can point at another AI (e.g. "meta") or a
+# human id from humans.yaml.
+reports_to: "joe"

@@ -1,0 +1,119 @@
+=== Slice 10 Wave 0 — Pre-migration data integrity ===
+Timestamp: 2026-05-08T15:27:58Z
+Worktree HEAD: fe643a3548a3df1eada806d036f412115e4dceff
+Branch: worktree-agent-a28d14d40290d1d13
+
+=== agent.yaml.example SHA-256 hashes (pre) ===
+c044a955a42b480c3fe2eacdcf41cd6caae59614043d2a9cec26d1aa7b2dac16  agents/_template/agent.yaml.example
+b2fac146f82946f43f5e422bf28d33f828f68bfe37a8cb1c744cc24c42b8aacb  agents/comms/agent.yaml.example
+8fb03d1d0baf3647dae7fee2586f338eda74ef764654f60b5b9cfe854b8946e2  agents/content/agent.yaml.example
+b78f5875010bb525a2de273db6ea3f28c6eb4282652d8e3d2339d39d910652b2  agents/ops/agent.yaml.example
+f6fc27c1cf63739a2a4398fe3f0d3f5f4ec24cded781957c914ac1a560207dc8  agents/research/agent.yaml.example
+286af5885e40eee208840635f6867577ae56623a6d08fe2b97e2c628e2abd8ba  agents/trading-monitor/agent.yaml.example
+
+=== humans.yaml SHA-256 (pre) ===
+d017dddba2d6f2a92ad1c9e3795e05a3d3fb70a830cdc66b40fa3f3497a78812  /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a28d14d40290d1d13/humans.yaml
+
+=== CLAUDE.md hashes (pre) — these MUST stay identical post-migration ===
+ca0b24df2b0dc3c16dd6700aabf2a4f7ae686b0881259c44425fc0233728d955  /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a28d14d40290d1d13/agents/_template/CLAUDE.md
+f53172c4dc0c96c5cb6979b2597352ad7e8d908548a44dd162fce2ff68057514  /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a28d14d40290d1d13/agents/comms/CLAUDE.md
+9e4588d9e7892a5bf2058f509c282b0988474da0b39df1d612dd3c0aede2a968  /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a28d14d40290d1d13/agents/content/CLAUDE.md
+173bd73957f3812ef0922c7c68709a7a21508ffb8d16d825295655b080a0b2ad  /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a28d14d40290d1d13/agents/ops/CLAUDE.md
+950a0061c05ab26ff614a009d8ac01cdab35f821f648514d0a2f715b6ed4ddb0  /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a28d14d40290d1d13/agents/research/CLAUDE.md
+fe2303cf7de95993f87f7664d81d07704dafa84ae7c96046c126d3f74b5b2c24  /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a28d14d40290d1d13/agents/trading-monitor/CLAUDE.md
+33498ba53e0ca17e7db9c5ffe0a3b686ccf3c91600581a03cd3171266df0c78f  /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a28d14d40290d1d13/CLAUDE.md
+
+=== src/agent-config.ts SHA-256 (pre) ===
+82bf2e8004a427a3489e597d092266405d95606135cc2880ff3e5323f2cec549  /Volumes/4TB-990/dev/claude-clawos/.claude/worktrees/agent-a28d14d40290d1d13/src/agent-config.ts
+
+=== top-level keys per agent.yaml.example (pre) ===
+--- agents/_template/agent.yaml.example ---
+avatar: ""
+description: What this agent does
+four_rs:
+ideal: false
+lob: ""
+model: claude-sonnet-4-6
+name: My Agent
+owns:
+platform: ""
+projects: []
+skills:
+telegram_bot_token_env: MYAGENT_BOT_TOKEN
+--- agents/comms/agent.yaml.example ---
+avatar: ""
+description: All human communication -- email, Slack, WhatsApp, YouTube comments, community forums, LinkedIn DMs
+four_rs:
+ideal: false
+lob: ""
+model: claude-sonnet-4-6
+name: Comms
+owns:
+platform: ""
+projects: []
+skills:
+telegram_bot_token_env: COMMS_BOT_TOKEN
+--- agents/content/agent.yaml.example ---
+avatar: ""
+description: YouTube scripts, LinkedIn posts, carousels, trend research, content calendar
+four_rs:
+ideal: false
+lob: ""
+model: claude-sonnet-4-6
+name: Content
+owns:
+platform: ""
+projects: []
+skills:
+telegram_bot_token_env: CONTENT_BOT_TOKEN
+--- agents/ops/agent.yaml.example ---
+avatar: ""
+description: Calendar, scheduling, billing, Stripe, Gumroad, admin, task management
+four_rs:
+ideal: false
+lob: ""
+model: claude-sonnet-4-6
+name: Ops
+owns:
+platform: ""
+projects: []
+skills:
+telegram_bot_token_env: OPS_BOT_TOKEN
+--- agents/research/agent.yaml.example ---
+avatar: ""
+description: Deep web research, academic sources, competitive intel, trend analysis
+four_rs:
+ideal: false
+lob: ""
+model: claude-sonnet-4-6
+name: Research
+owns:
+platform: ""
+projects: []
+skills:
+telegram_bot_token_env: RESEARCH_BOT_TOKEN
+--- agents/trading-monitor/agent.yaml.example ---
+avatar: ""
+description: Live signal handler. Receives trading signal webhooks (Gold Scalping, Ceddi, etc.), parses them, decides action, logs to hive mind. Read-only on the lab; never sends orders.
+four_rs:
+ideal: false
+lob: "trading"
+model: claude-sonnet-4-6
+name: Trading Monitor
+owns:
+platform: "claude"
+projects:
+skills:
+telegram_bot_token_env: TRADING_MONITOR_BOT_TOKEN
+
+=== top-level keys in humans.yaml (pre) ===
+  - id: joe
+    name: Joe
+    role: Founder / operator
+    owns_lobs:
+    owns_projects: []
+  - id: ali
+    name: Ali
+    role: Operator
+    owns_lobs:
+    owns_projects: []

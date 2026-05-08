@@ -28,6 +28,7 @@ function getRemoteIp(c: any): string {
 }
 import {
   getAllScheduledTasks,
+  createScheduledTask,
   deleteScheduledTask,
   pauseScheduledTask,
   resumeScheduledTask,
@@ -149,6 +150,10 @@ import {
   loadWebhookWatcher,
   listWebhookWatchers,
   runActions as runWatcherActions,
+  createWebhookWatcher,
+  updateWebhookWatcher,
+  deleteWebhookWatcher,
+  loadAnyWatcher,
 } from './watchers.js';
 import { getIngestionQuotaStatus, extractViaClaude } from './memory-ingest.js';
 import { WARROOM_ENABLED, WARROOM_PORT } from './config.js';
@@ -1651,6 +1656,67 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     return c.json({ tasks });
   });
 
+  // Create a scheduled task. Reuses the same code path as the
+  // schedule-cli (`createScheduledTask` + `computeNextRun`) so behavior is
+  // identical between CLI and dashboard creation. Validates cron syntax
+  // server-side via cron-parser; an invalid cron returns 400 with the
+  // parser's error message so the UI can surface it inline.
+  //
+  //   Body: { agent_id?, prompt, cron, skill?, title? }
+  //
+  // - agent_id defaults to 'main' (matches CLI semantics)
+  // - skill / title are optional metadata fields persisted as part of
+  //   the prompt prefix (the scheduled_tasks table has no skill column;
+  //   we prepend "[skill:foo] " to keep the schema unchanged)
+  // - title is purely UI-side; the CLI doesn't track titles either, so
+  //   we ignore it server-side and let the UI derive a label from the
+  //   prompt prefix when listing.
+  app.post('/api/tasks', async (c) => {
+    type CreateBody = {
+      agent_id?: string;
+      prompt?: string;
+      cron?: string;
+      schedule?: string;
+      skill?: string;
+      title?: string;
+    };
+    const body = await c.req.json<CreateBody>().catch(() => ({} as CreateBody));
+
+    const prompt = (body?.prompt || '').trim();
+    const cron = (body?.cron || body?.schedule || '').trim();
+    const agentId = (body?.agent_id || 'main').trim();
+    const skill = (body?.skill || '').trim();
+
+    if (!prompt) return c.json({ ok: false, error: 'prompt required' }, 400);
+    if (prompt.length > 10000) return c.json({ ok: false, error: 'prompt too long (max 10000 chars)' }, 400);
+    if (!cron) return c.json({ ok: false, error: 'cron required' }, 400);
+
+    const validAgents = ['main', ...listAgentIds()];
+    if (!validAgents.includes(agentId)) {
+      return c.json({ ok: false, error: `Unknown agent: ${agentId}. Valid: ${validAgents.join(', ')}` }, 400);
+    }
+
+    let nextRun: number;
+    try {
+      nextRun = computeNextRun(cron);
+    } catch (err: any) {
+      return c.json({ ok: false, error: 'invalid cron: ' + (err?.message || String(err)) }, 400);
+    }
+
+    // Skill-prefixed prompt: scheduled_tasks has no skill column, so we
+    // encode it inline. Skipped when no skill is provided.
+    const fullPrompt = skill ? `[skill:${skill}] ${prompt}` : prompt;
+
+    const id = crypto.randomBytes(4).toString('hex');
+    createScheduledTask(id, fullPrompt, cron, nextRun, agentId);
+
+    insertAuditLog(agentId, 'dashboard', 'scheduled_task_created',
+      `id=${id} cron="${cron}" agent=${agentId}${skill ? ' skill=' + skill : ''}`, false);
+
+    const created = getAllScheduledTasks().find((t) => t.id === id);
+    return c.json({ ok: true, task: created });
+  });
+
   // Delete a scheduled task
   app.delete('/api/tasks/:id', (c) => {
     const id = c.req.param('id');
@@ -1792,6 +1858,80 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     });
 
     return c.json({ ok: true, mode: 'test', payload_id: payloadId, queued_mission_tasks: queuedIds });
+  });
+
+  // ── Slice 8: Webhook watcher CRUD ────────────────────────────────────
+  //
+  // Create / edit / delete webhook entries in watchers.yaml. Limited to
+  // type=webhook intentionally — log-tail and sqlite-poll watchers are
+  // operator-managed (they reference paths and SQL that need code review).
+  //
+  // After mutation, no bot restart is needed: loadWebhookWatcher() and
+  // listWebhookWatchers() re-read watchers.yaml on every call.
+  app.post('/api/watchers', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as {
+      type?: string;
+      name?: string;
+      slug?: string;
+      secret_env?: string;
+      mode?: 'test' | 'preview' | 'run';
+      actions?: unknown[];
+    };
+    if (body.type && body.type !== 'webhook') {
+      return c.json({ ok: false, error: `cannot create ${body.type} via API; only webhook is supported` }, 400);
+    }
+    const result = createWebhookWatcher({
+      name: body.name || '',
+      slug: body.slug || '',
+      secret_env: body.secret_env || '',
+      mode: body.mode,
+      actions: (body.actions || []) as any[],
+    });
+    if (!result.ok) return c.json({ ok: false, error: result.error }, result.status as 400 | 404 | 409);
+    insertAuditLog('main', 'dashboard', 'webhook_watcher_created',
+      `slug=${result.watcher.slug} name="${result.watcher.name}" mode=${result.watcher.mode}`, false);
+    return c.json({ ok: true, watcher: result.watcher });
+  });
+
+  app.put('/api/watchers/:slug', async (c) => {
+    const slug = c.req.param('slug');
+    const body = await c.req.json().catch(() => ({})) as {
+      name?: string;
+      secret_env?: string;
+      mode?: 'test' | 'preview' | 'run';
+      actions?: unknown[];
+    };
+    const result = updateWebhookWatcher(slug, {
+      name: body.name,
+      secret_env: body.secret_env,
+      mode: body.mode,
+      actions: body.actions as any[] | undefined,
+      slug, // not used (immutable) but satisfies the type
+    });
+    if (!result.ok) return c.json({ ok: false, error: result.error }, result.status as 400 | 404 | 409);
+    insertAuditLog('main', 'dashboard', 'webhook_watcher_updated',
+      `slug=${slug} name="${result.watcher.name}" mode=${result.watcher.mode}`, false);
+    return c.json({ ok: true, watcher: result.watcher });
+  });
+
+  app.delete('/api/watchers/:slug', (c) => {
+    const slug = c.req.param('slug');
+    // Explicit type guard: log-tail and sqlite-poll watchers are
+    // operator-managed via watchers.yaml; refuse to delete them via API
+    // with a 403 instead of letting the webhook-only path return a
+    // misleading 404. Missing entries still 404 below.
+    const existing = loadAnyWatcher(slug);
+    if (existing && (existing.type === 'log-tail' || existing.type === 'sqlite-poll')) {
+      return c.json({
+        error: 'operator-managed',
+        message: 'log-tail and sqlite-poll watchers are managed in watchers.yaml directly. Edit the file by hand to add/remove these.',
+      }, 403);
+    }
+    const result = deleteWebhookWatcher(slug);
+    if (!result.ok) return c.json({ ok: false, error: result.error }, result.status as 400 | 404 | 409);
+    insertAuditLog('main', 'dashboard', 'webhook_watcher_deleted',
+      `slug=${slug}`, false);
+    return c.json({ ok: true });
   });
 
   // ── Mission Control endpoints ────────────────────────────────────────

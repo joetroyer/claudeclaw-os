@@ -1,66 +1,43 @@
-# Watchers — declarative event-driven monitors for ClawdOS.
-#
-# Three watcher types:
-#   - log-tail:    tails a file, matches each line against `regex`
-#   - sqlite-poll: runs `sql` every `interval_sec`, fires once per row
-#   - webhook:     accepts external POSTs to /api/watchers/webhook/{slug}
-#                  with HMAC-SHA256 verification (Slice 2)
-#
-# Action types:
-#   - send-telegram:  notify the user (autonomous, safe)
-#   - queue-mission:  insert a mission_tasks row (autonomous, safe)
-#   - mark-meet-stale: cleanup helper (autonomous, safe)
-#   - run-skill:     invoke a named skill on an agent (Slice 2; dispatches
-#                    via mission_tasks under the hood)
-#
-# Destructive ops (process restarts, launchctl) are intentionally NOT here —
-# every restart is notify-only. The user runs the restart command themselves.
-
 watchers:
-  # 1. WhatsApp daemon health
   - name: wa-daemon-health
     type: log-tail
     path: /Volumes/4TB-990/dev/claude-clawos/logs/wa-daemon.log
     triggers:
-      - regex: 'disconnected|ready=false|reconnect failed|message handler error'
+      - regex: disconnected|ready=false|reconnect failed|message handler error
         debounce_sec: 60
         actions:
-          - send-telegram: "WhatsApp daemon issue: {match}\n\nIf it doesn't recover in ~30s, restart with:\npkill -f wa-daemon && cd /Volumes/4TB-990/dev/claude-clawos && nohup /opt/homebrew/Cellar/node@20/20.19.6/bin/node ./node_modules/.bin/tsx scripts/wa-daemon.ts > logs/wa-daemon.log 2>&1 &"
+          - send-telegram: |-
+              WhatsApp daemon issue: {match}
 
-  # 2. Cloudflare tunnel health
+              If it doesn't recover in ~30s, restart with:
+              pkill -f wa-daemon && cd /Volumes/4TB-990/dev/claude-clawos && nohup /opt/homebrew/Cellar/node@20/20.19.6/bin/node ./node_modules/.bin/tsx scripts/wa-daemon.ts > logs/wa-daemon.log 2>&1 &
   - name: tunnel-health
     type: log-tail
     path: /tmp/clawos-tunnel.log
     triggers:
-      - regex: 'ERR Request failed|Connection refused|Connection terminated|connection lost'
+      - regex: ERR Request failed|Connection refused|Connection terminated|connection lost
         debounce_sec: 120
         actions:
-          - send-telegram: "Cloudflare tunnel: {match}"
-
-  # 3. Main bot crashes / fatals / subprocess errors
+          - send-telegram: 'Cloudflare tunnel: {match}'
   - name: bot-fatal
     type: log-tail
     path: /tmp/claudeclaw-main.log
     triggers:
-      # NOTE: dropped bare "FATAL" — matched the watcher's own startup log
-      # ("watcher: bot-fatal" contains lowercase fatal, regex is case-insensitive,
-      # → self-fire). The other patterns cover real crashes.
-      - regex: 'EADDRINUSE|UnhandledPromiseRejection|uncaught exception|Bot.*crashed|subprocess_crash|subprocess crashed|process exited with code [^0]|Not logged in|Please run /login|Agent query failed|Claude Code returned an error result'
+      - regex: EADDRINUSE|UnhandledPromiseRejection|uncaught exception|Bot.*crashed|subprocess_crash|subprocess crashed|process exited with code [^0]|Not logged in|Please run /login|Agent query failed|Claude Code returned an error result
         debounce_sec: 30
         actions:
-          - send-telegram: "Bot trouble: {match}\n\nMain bot is hitting agent errors. If it's auth: SSH in and run `claude login` for HOME=/Users/dev. If subprocess crash: launchctl kickstart -k gui/$(id -u)/com.claudeclaw.main"
+          - send-telegram: |-
+              Bot trouble: {match}
 
-  # 4. War Room voice connection failures (Pipecat / Gemini Live)
+              Main bot is hitting agent errors. If it's auth: SSH in and run `claude login` for HOME=/Users/dev. If subprocess crash: launchctl kickstart -k gui/$(id -u)/com.claudeclaw.main
   - name: warroom-voice-health
     type: log-tail
     path: /tmp/warroom-debug.log
     triggers:
-      - regex: '1005|signaling socket closed|Connection closed unexpectedly|pipeline error'
+      - regex: 1005|signaling socket closed|Connection closed unexpectedly|pipeline error
         debounce_sec: 60
         actions:
-          - send-telegram: "War Room voice connection issue: {match}"
-
-  # 5. Stuck mission tasks (queued >10 min)
+          - send-telegram: 'War Room voice connection issue: {match}'
   - name: stuck-mission-tasks
     type: sqlite-poll
     sql: |
@@ -76,10 +53,8 @@ watchers:
     actions:
       - queue-mission:
           agent: meta
-          title: "Stuck task triage: {title}"
-          prompt: "Mission task {id} ({title}, assigned to {assigned_agent}) has been queued for over 10 minutes. Check why it hasn't started. If the assigned agent is overloaded, reassign to a different specialist or escalate to me."
-
-  # 6. Stale "live" meet sessions (older than 2h)
+          title: 'Stuck task triage: {title}'
+          prompt: Mission task {id} ({title}, assigned to {assigned_agent}) has been queued for over 10 minutes. Check why it hasn't started. If the assigned agent is overloaded, reassign to a different specialist or escalate to me.
   - name: meet-session-stale-cleanup
     type: sqlite-poll
     sql: |
@@ -89,11 +64,9 @@ watchers:
         AND created_at < strftime('%s','now') - 7200
     interval_sec: 300
     actions:
-      - mark-meet-stale: { id_field: id }
-      - send-telegram: "Auto-closed stale meet session {id} ({meet_url}) — was 'live' >2h"
-
-  # 7. New WhatsApp from a tagged contact
-  #    Filter list: edit `IN (...)` to control who triggers the comms agent.
+      - mark-meet-stale:
+          id_field: id
+      - send-telegram: Auto-closed stale meet session {id} ({meet_url}) — was 'live' >2h
   - name: incoming-whatsapp-vip
     type: sqlite-poll
     sql: |
@@ -109,18 +82,14 @@ watchers:
     actions:
       - queue-mission:
           agent: comms
-          title: "Reply to {contact_name} on WhatsApp"
-          prompt: "New WhatsApp from {contact_name}: \"{body}\"\n\nDraft a reply matching Joe's voice. If you're unsure of context or the right answer, ask Joe before sending. If it's a quick acknowledgment that obviously doesn't need approval, send via the whatsapp_send tool."
+          title: Reply to {contact_name} on WhatsApp
+          prompt: |-
+            New WhatsApp from {contact_name}: "{body}"
 
-  # 8. Trading signal webhook (Slice 2 smoke test).
-  #    External callers (n8n, custom listener, signal aggregator) POST signed
-  #    payloads to https://clawos.joetroyer.com/api/watchers/webhook/trading-monitor
-  #    with header `X-Claudeclaw-Signature: sha256=<hmac>` over the raw body.
-  #    See `proof/slice-2/webhook-signing-example.md` for canonical signing.
-  #
-  #    Mode lifecycle: ships as `test` (HMAC required, payload + actions
-  #    captured but tagged as test runs). Flip to `preview` to capture
-  #    payload shape only without firing actions. Flip to `run` for live.
+            Draft a reply matching Joe's voice. If you're unsure of context or the right answer, ask Joe before sending. If it's a quick acknowledgment that obviously doesn't need approval, send via the whatsapp_send tool.
+  # Live broker pipeline (public.signals → ceddi-only). Bridge:
+  # supabase/functions/clawos-ceddi-bridge/. Default-priority signals; agent
+  # may escalate to high based on lab-query-channel-credibility.
   - name: trading-monitor-trigger
     type: webhook
     slug: trading-monitor
@@ -129,43 +98,50 @@ watchers:
     actions:
       - queue-mission:
           agent: trading-monitor
-          title: "Trading signal received ({slug})"
+          title: "Live trading signal: {payload.provider} {payload.side} {payload.entry}"
           prompt: |
-            A trading signal payload was received via webhook.
+            Live trading signal from the broker dispatch pipeline (public.signals).
 
-            Mode: {mode}
-            Watcher: {watcher}
+            Provider: {payload.provider}
+            Side: {payload.side}  Entry: {payload.entry}  SL: {payload.sl}  TP: {payload.tp}
+            Status: {payload.status}  Signal type: {payload.signal_type}
+            DB event: {payload.db_event}
 
-            Raw payload:
-            {payload_raw}
+            Raw: {payload.raw}
+            Full payload: {payload_raw}
 
-            Parse it, classify priority, log to hive_mind, and notify Joe if priority=high. Do NOT trade. Do NOT send orders.
+            Parse, classify priority, log to hive_mind, notify Joe via Telegram if priority=high. Do NOT trade. Do NOT send orders.
 
-  # 9. n8n error router (Slice 4).
-  #    n8n's error workflow POSTs (HMAC-signed) to
-  #    https://clawos.joetroyer.com/api/watchers/webhook/n8n-error
-  #
-  #    Expected payload shape (draft — see proof/slice-4/n8n-payload-schema.md):
-  #      {
-  #        "workflow_id":     "wf_lab_etl_42",        # required, used for owner lookup
-  #        "workflow_name":   "Goldbot ETL",          # optional, for display
-  #        "error_message":   "Connection refused...",# required, used for signature
-  #        "error_signature": "ENOTFOUND-broker-api", # optional, overrides hash
-  #        "execution_id":    "exec_2c4e8...",        # optional
-  #        "execution_url":   "https://n8n/.../exec/" # optional, link in Slack
-  #      }
-  #
-  #    Routing:
-  #      - lookup-owner reads `payload.workflow_id`, queries
-  #        n8n_workflow_owners, sets vars._owner_agent / _owner_found and
-  #        applies a 60s debounce keyed by workflow_id + error_signature.
-  #      - if-owned   → mission_task on the owning agent.
-  #      - if-unowned → mission_task on `meta` (triage) AND a Slack post
-  #                      with a link to /mission so Joe can see it.
-  #
-  #    Mode lifecycle (same as Slice 2): ships as `test`. Flip to `run`
-  #    after a real n8n payload has been observed in webhook_payloads
-  #    and the ownership table seeded for the production workflows.
+  # Observation-only L1 ingest (analysis.signals_l1 → all ingest_only providers:
+  # GoldSignals.io VIP Intraday/Swing, Gold Scalping & Zones, plus future
+  # ingest_only providers). Bridge: supabase/functions/clawos-ingest-bridge/.
+  # Log to hive_mind only — NEVER ping Joe on Telegram from this path.
+  - name: trading-monitor-ingest
+    type: webhook
+    slug: trading-monitor-ingest
+    secret_env: TRADING_MONITOR_INGEST_SECRET
+    mode: test
+    actions:
+      - queue-mission:
+          agent: trading-monitor
+          title: "Ingest signal: {payload.provider} {payload.side} {payload.entry}"
+          prompt: |
+            OBSERVATION-ONLY ingest signal from analysis.signals_l1.
+
+            Provider: {payload.provider}
+            Side: {payload.side}  Entry: {payload.entry}  SL: {payload.sl}  TP: {payload.tp}
+            Posted at: {payload.posted_at}  Source channel: {payload.source_channel_id}
+            Buy-now: {payload.is_buy_now}  Split message: {payload.is_split_message}
+            Parser warnings: {payload.parser_warnings}
+
+            Raw: {payload.raw}
+            Full payload: {payload_raw}
+
+            Log to hive_mind. **Never** ping Joe via Telegram from this path —
+            ingest signals are observation-only. Run lab-query-channel-credibility
+            if you want to enrich the log entry with provider credibility data.
+            Do NOT trade. Do NOT send orders.
+
   - name: n8n-error-router
     type: webhook
     slug: n8n-error
@@ -178,8 +154,8 @@ watchers:
           debounce_sec: 60
       - if-owned:
           - queue-mission:
-              agent: "{_owner_agent}"
-              title: "n8n error: {payload.workflow_name} ({_workflow_id})"
+              agent: '{_owner_agent}'
+              title: 'n8n error: {payload.workflow_name} ({_workflow_id})'
               prompt: |
                 An n8n workflow you own errored out.
 
@@ -194,7 +170,7 @@ watchers:
       - if-unowned:
           - queue-mission:
               agent: meta
-              title: "n8n triage: unowned workflow {_workflow_id}"
+              title: 'n8n triage: unowned workflow {_workflow_id}'
               prompt: |
                 An n8n workflow with no registered owner errored out.
 

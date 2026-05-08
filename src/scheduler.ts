@@ -89,7 +89,9 @@ async function runDueTasks(): Promise<void> {
       const timeout = setTimeout(() => abortController.abort(), TASK_TIMEOUT_MS);
 
       try {
-        await sender(`Scheduled task running: "${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '...' : ''}"`);
+        if (!task.silent_start) {
+          await sender(`Scheduled task running: "${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '...' : ''}"`);
+        }
 
         // Run as a fresh agent call (no session — scheduled tasks are autonomous)
         const result = await runAgent(task.prompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist);
@@ -103,15 +105,19 @@ async function runDueTasks(): Promise<void> {
         }
 
         const text = result.text?.trim() || 'Task completed with no output.';
-        for (const chunk of splitMessage(formatForTelegram(text))) {
-          await sender(chunk);
-        }
+        if (!task.silent_result) {
+          for (const chunk of splitMessage(formatForTelegram(text))) {
+            await sender(chunk);
+          }
 
-        // Inject task output into the active chat session so user replies have context
-        if (ALLOWED_CHAT_ID) {
-          const activeSession = getSession(ALLOWED_CHAT_ID, schedulerAgentId);
-          logConversationTurn(ALLOWED_CHAT_ID, 'user', `[Scheduled task]: ${task.prompt}`, activeSession ?? undefined, schedulerAgentId);
-          logConversationTurn(ALLOWED_CHAT_ID, 'assistant', text, activeSession ?? undefined, schedulerAgentId);
+          // Inject task output into the active chat session so user replies have context.
+          // Skipped when silent_result is set — if the user never saw the message on Telegram,
+          // pre-loading it into chat context would surprise them on their next message.
+          if (ALLOWED_CHAT_ID) {
+            const activeSession = getSession(ALLOWED_CHAT_ID, schedulerAgentId);
+            logConversationTurn(ALLOWED_CHAT_ID, 'user', `[Scheduled task]: ${task.prompt}`, activeSession ?? undefined, schedulerAgentId);
+            logConversationTurn(ALLOWED_CHAT_ID, 'assistant', text, activeSession ?? undefined, schedulerAgentId);
+          }
         }
 
         updateTaskAfterRun(task.id, nextRun, text, 'success');
@@ -190,16 +196,20 @@ async function runDueMissionTasks(): Promise<void> {
         completeMissionTask(mission.id, text, 'completed');
         logger.info({ missionId: mission.id }, 'Mission task completed');
 
-        // Send result to Telegram
-        for (const chunk of splitMessage(formatForTelegram(text))) {
-          await sender(chunk);
-        }
+        if (!mission.silent_result) {
+          // Send result to Telegram
+          for (const chunk of splitMessage(formatForTelegram(text))) {
+            await sender(chunk);
+          }
 
-        // Inject into conversation context so agent can reference it
-        if (ALLOWED_CHAT_ID) {
-          const activeSession = getSession(ALLOWED_CHAT_ID, schedulerAgentId);
-          logConversationTurn(ALLOWED_CHAT_ID, 'user', '[Mission task: ' + mission.title + ']: ' + mission.prompt, activeSession ?? undefined, schedulerAgentId);
-          logConversationTurn(ALLOWED_CHAT_ID, 'assistant', text, activeSession ?? undefined, schedulerAgentId);
+          // Inject into conversation context so agent can reference it.
+          // Skipped when silent_result is set so a future user message
+          // doesn't get unexpected pre-context for a result they never saw.
+          if (ALLOWED_CHAT_ID) {
+            const activeSession = getSession(ALLOWED_CHAT_ID, schedulerAgentId);
+            logConversationTurn(ALLOWED_CHAT_ID, 'user', '[Mission task: ' + mission.title + ']: ' + mission.prompt, activeSession ?? undefined, schedulerAgentId);
+            logConversationTurn(ALLOWED_CHAT_ID, 'assistant', text, activeSession ?? undefined, schedulerAgentId);
+          }
         }
       }
     } catch (err) {
@@ -211,6 +221,11 @@ async function runDueMissionTasks(): Promise<void> {
       } else {
         completeMissionTask(mission.id, null, 'failed', errMsg.slice(0, 500));
         logger.error({ err, missionId: mission.id }, 'Mission task failed');
+        try {
+          await sender(`❌ Mission task failed: "${mission.title}" — ${errMsg.slice(0, 200)}`);
+        } catch (sendErr) {
+          logger.warn({ err: sendErr, missionId: mission.id }, 'Failed to send mission failure notification');
+        }
       }
     } finally {
       clearInterval(cancelPoll);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import { Pause, Play, Trash2, Clock, LayoutGrid, List, CheckSquare, Plus } from 'lucide-preact';
+import { Pause, Play, Trash2, Clock, LayoutGrid, List, CheckSquare, Plus, BellOff, MessageSquareOff } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { Pill } from '@/components/Pill';
 import { PageState } from '@/components/PageState';
@@ -27,6 +27,8 @@ interface ScheduledTask {
   agent_id: string;
   started_at: number | null;
   last_status: 'success' | 'failed' | 'timeout' | null;
+  silent_start: number;
+  silent_result: number;
 }
 
 type ViewMode = 'cards' | 'list';
@@ -352,6 +354,18 @@ function TaskCard({ task, blurOn, selected, onToggleSelect, onAction, onDeleteRe
               <span class="text-[var(--color-accent)] tabular-nums">{formatCountdown(task.next_run)}</span>
             )}
             <Pill tone={statusTone}>{task.status}</Pill>
+            {task.silent_start ? (
+              <span class="inline-flex items-center gap-1 text-[var(--color-text-faint)]" title="Silent start: no pre-announce">
+                <BellOff size={11} />
+                <span class="text-[10.5px]">silent start</span>
+              </span>
+            ) : null}
+            {task.silent_result ? (
+              <span class="inline-flex items-center gap-1 text-[var(--color-text-faint)]" title="Silent result: no result message on Telegram">
+                <MessageSquareOff size={11} />
+                <span class="text-[10.5px]">silent result</span>
+              </span>
+            ) : null}
             {task.agent_id !== 'main' && <span class="font-mono">@{task.agent_id}</span>}
             {task.last_status && (
               <Pill tone={task.last_status === 'success' ? 'done' : task.last_status === 'timeout' ? 'medium' : 'failed'}>
@@ -424,6 +438,16 @@ function TaskListRow({ task, blurOn, selected, onToggleSelect, onAction, onDelet
             {task.last_status}
           </Pill>
         )}
+        {task.silent_start ? (
+          <span class="ml-1 inline-flex items-center text-[var(--color-text-faint)]" title="Silent start: no pre-announce">
+            <BellOff size={11} />
+          </span>
+        ) : null}
+        {task.silent_result ? (
+          <span class="ml-1 inline-flex items-center text-[var(--color-text-faint)]" title="Silent result: no result message on Telegram">
+            <MessageSquareOff size={11} />
+          </span>
+        ) : null}
       </td>
       <td class="px-3 py-2.5 font-mono text-[11px] text-[var(--color-text-muted)] whitespace-nowrap">
         @{task.agent_id}

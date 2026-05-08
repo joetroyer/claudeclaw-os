@@ -51,12 +51,12 @@ interface RegexTrigger extends BaseTrigger {
 }
 export type Action =
   | { 'send-telegram': string }
-  | { 'queue-mission': { agent: string; title: string; prompt: string } }
+  | { 'queue-mission': { agent: string; title: string; prompt: string; silent_start?: boolean; silent_result?: boolean } }
   | { 'mark-meet-stale': { id_field?: string } }
   // Slice 2: invoke a skill on an agent directly. Currently dispatches via
   // mission_tasks (skills run inside a mission turn) so we reuse the
   // existing mission worker rather than forking a parallel runtime.
-  | { 'run-skill': { agent: string; skill: string; title?: string; prompt?: string } }
+  | { 'run-skill': { agent: string; skill: string; title?: string; prompt?: string; silent_start?: boolean; silent_result?: boolean } }
   // ── Slice 4: n8n auto-task routing ─────────────────────────────────
   // Side-effect action: read `payload.<workflow_field>` and consult the
   // n8n_workflow_owners table. Sets internal vars `_owner_agent` (string
@@ -182,15 +182,15 @@ async function sendTelegram(text: string): Promise<void> {
   }
 }
 
-function queueMission(agent: string, title: string, prompt: string, createdBy = 'watcher'): string {
+function queueMission(agent: string, title: string, prompt: string, createdBy = 'watcher', silentStart = false, silentResult = false): string {
   const db = new Database(storeDbPath());
   try {
     const id = `wat_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     db.prepare(
-      `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, priority, created_at, created_by)
-       VALUES (?, ?, ?, ?, 'queued', 50, ?, ?)`,
-    ).run(id, title, prompt, agent, Math.floor(Date.now() / 1000), createdBy);
-    logger.info({ id, agent, title, createdBy }, 'watcher: queued mission task');
+      `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, priority, created_at, created_by, silent_start, silent_result)
+       VALUES (?, ?, ?, ?, 'queued', 50, ?, ?, ?, ?)`,
+    ).run(id, title, prompt, agent, Math.floor(Date.now() / 1000), createdBy, silentStart ? 1 : 0, silentResult ? 1 : 0);
+    logger.info({ id, agent, title, createdBy, silentStart, silentResult }, 'watcher: queued mission task');
     return id;
   } finally {
     db.close();
@@ -408,7 +408,7 @@ export async function runActions(actions: Action[], vars: Record<string, unknown
         // is a no-op on a string with no `{name}` patterns, so this is
         // backwards compatible with all existing watcher entries.
         const agent = substitute(m.agent, vars);
-        const id = queueMission(agent, substitute(m.title, vars), substitute(m.prompt, vars));
+        const id = queueMission(agent, substitute(m.title, vars), substitute(m.prompt, vars), 'watcher', !!m.silent_start, !!m.silent_result);
         queuedIds.push(id);
       } else if ('mark-meet-stale' in a) {
         const idField = a['mark-meet-stale'].id_field || 'id';
@@ -424,7 +424,7 @@ export async function runActions(actions: Action[], vars: Record<string, unknown
           ? substitute(m.prompt, vars)
           : `Run the \`${m.skill}\` skill with this payload:\n\n${typeof vars.payload === 'string' ? vars.payload : JSON.stringify(vars.payload ?? vars, null, 2)}`;
         const prompt = `[Triggered via webhook · skill=${m.skill}]\n\n${basePrompt}`;
-        const id = queueMission(m.agent, title, prompt, 'watcher:webhook');
+        const id = queueMission(m.agent, title, prompt, 'watcher:webhook', !!m.silent_start, !!m.silent_result);
         queuedIds.push(id);
       } else if ('lookup-owner' in a) {
         // Slice 4: side-effect — populate vars._owner_agent / _owner_found /

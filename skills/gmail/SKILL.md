@@ -1,162 +1,127 @@
 ---
 name: gmail
-description: Manage your Gmail inbox from Claude Code. List, read, triage, reply, send, and create filters.
-allowed-tools: Bash(CLAUDECLAW_DIR=* ~/.venv/bin/python3 ~/.config/gmail/gmail.py *)
+description: Manage your Gmail inbox via the `gws` CLI. List, read, triage, reply, send, and create filters.
+allowed-tools: Bash(gws *), Bash(git rev-parse *), Bash(jq *)
 ---
 
 # Gmail Skill
 
 ## Purpose
 
-Read, triage, reply, and send emails from your Gmail inbox via Claude Code.
+Read, triage, reply, and send emails for joetroyer@gmail.com via the Google Workspace CLI (`gws`).
 
-## Environment
+## Backend
 
-The Gmail CLI reads credential paths from environment variables, loaded from ClaudeClaw's `.env` via `CLAUDECLAW_DIR`. Every command MUST use this prefix:
+Uses `gws` (`@googleworkspace/cli`), already installed and authed at `~/.config/gws/`. All output is structured JSON — pipe through `jq`.
 
-```
-CLAUDECLAW_DIR=/path/to/claudeclaw
-```
-
-Your `.env` should contain:
-
-```
-GOOGLE_CREDS_PATH=~/.config/gmail/credentials.json
-GMAIL_TOKEN_PATH=~/.config/gmail/token.json
-```
-
-If these aren't set, the script falls back to `~/.config/gmail/credentials.json` and `~/.config/gmail/token.json`.
+If you see `403 insufficient authentication scopes`, run `rm ~/.config/gws/token_cache.json` and retry. That forces a token refresh from the stored refresh-token.
 
 ## Commands
 
-### List inbox (full inbox, grouped by thread)
+### List inbox grouped by thread (default)
 
-```bash
-CLAUDECLAW_DIR=/path/to/claudeclaw ~/.venv/bin/python3 ~/.config/gmail/gmail.py list --all
-```
+    gws gmail users threads list --params '{"userId":"me","labelIds":["INBOX"],"maxResults":50}'
 
-Returns JSON array grouped by thread. Each entry has: `id`, `threadId`, `from`, `subject`, `date`, `snippet`, `unread`, `thread_count`. If `thread_count > 1`, also includes `all_ids`.
+For per-thread metadata (subject/from):
 
-**This is the default command.** Always use `--all` unless the user specifically asks for a time-filtered view.
+    gws gmail users threads get --params '{"userId":"me","id":"<threadId>","format":"metadata"}'
 
-### List with time filter
+**Default behavior:** show inbox grouped by thread unless the user specifies a filter.
 
-```bash
-CLAUDECLAW_DIR=/path/to/claudeclaw ~/.venv/bin/python3 ~/.config/gmail/gmail.py list --hours 48
-```
+### List with a Gmail search query
+
+    gws gmail users messages list --params '{"userId":"me","q":"is:unread newer_than:2d","maxResults":50}'
+
+Gmail query syntax: `is:unread`, `from:x@y.com`, `to:me`, `newer_than:7d`, `has:attachment`, `subject:"…"`. Combine with spaces (AND) or `OR`.
 
 ### Read full email
 
-```bash
-CLAUDECLAW_DIR=/path/to/claudeclaw ~/.venv/bin/python3 ~/.config/gmail/gmail.py read <msg_id>
-```
+    gws gmail users messages get --params '{"userId":"me","id":"<msgId>","format":"full"}'
 
-### Move email to label/folder
+`format` options: `minimal`, `metadata`, `full`, `raw`.
 
-```bash
-CLAUDECLAW_DIR=/path/to/claudeclaw ~/.venv/bin/python3 ~/.config/gmail/gmail.py move <msg_id> "Label Name"
-```
+### List labels
 
-- If the label doesn't exist, it creates it automatically
-- Removes from INBOX, adds to target label, marks as read
+    gws gmail users labels list --params '{"userId":"me"}'
 
-### List all labels
+### Move email to a label (auto-create if missing, archive, mark read)
 
-```bash
-CLAUDECLAW_DIR=/path/to/claudeclaw ~/.venv/bin/python3 ~/.config/gmail/gmail.py labels
-```
+    LABEL_NAME="My Label"
+    LABEL_ID=$(gws gmail users labels list --params '{"userId":"me"}' \
+      | jq -r --arg n "$LABEL_NAME" '.labels[] | select(.name==$n) | .id')
+    if [ -z "$LABEL_ID" ]; then
+      LABEL_ID=$(gws gmail users labels create --params '{"userId":"me"}' \
+        --json "$(jq -nc --arg n "$LABEL_NAME" '{name:$n,labelListVisibility:"labelShow",messageListVisibility:"show"}')" \
+        | jq -r '.id')
+    fi
+    gws gmail users messages modify --params '{"userId":"me","id":"<msgId>"}' \
+      --json "$(jq -nc --arg lid "$LABEL_ID" '{addLabelIds:[$lid],removeLabelIds:["INBOX","UNREAD"]}')"
 
-### Reply to an email
+### Reply (preserves thread + In-Reply-To headers)
 
-```bash
-CLAUDECLAW_DIR=/path/to/claudeclaw ~/.venv/bin/python3 ~/.config/gmail/gmail.py reply <msg_id> "Your reply body here"
-```
+    MSG_ID="<original msg id>"; BODY="Your reply"
+    META=$(gws gmail users messages get --params "$(jq -nc --arg id "$MSG_ID" '{userId:"me",id:$id,format:"metadata",metadataHeaders:["From","Subject","Message-ID"]}')")
+    TO=$(echo "$META"   | jq -r '.payload.headers[] | select(.name=="From") | .value')
+    SUBJ=$(echo "$META" | jq -r '.payload.headers[] | select(.name=="Subject") | .value')
+    MID=$(echo "$META"  | jq -r '.payload.headers[] | select(.name|ascii_downcase=="message-id") | .value')
+    THREAD=$(echo "$META" | jq -r '.threadId')
+    RAW=$(printf 'To: %s\nSubject: Re: %s\nIn-Reply-To: %s\nReferences: %s\nContent-Type: text/plain; charset=UTF-8\n\n%s' \
+      "$TO" "${SUBJ#Re: }" "$MID" "$MID" "$BODY" | base64 | tr '+/' '-_' | tr -d '=\n')
+    gws gmail users messages send --params '{"userId":"me"}' \
+      --json "$(jq -nc --arg raw "$RAW" --arg tid "$THREAD" '{raw:$raw,threadId:$tid}')"
 
-- Automatically threads correctly (In-Reply-To, References headers)
-- Prefixes subject with "Re:" if not already there
-- Replies to the sender's From/Reply-To address
-
-### Reply with attachments
-
-```bash
-CLAUDECLAW_DIR=/path/to/claudeclaw ~/.venv/bin/python3 ~/.config/gmail/gmail.py reply <msg_id> "Your reply body here" --attachments "/path/to/file1.pdf,/path/to/file2.png"
-```
+For attachments, build a `multipart/mixed` MIME — ask the user if they need a recipe.
 
 ### Send a new email
 
-```bash
-CLAUDECLAW_DIR=/path/to/claudeclaw ~/.venv/bin/python3 ~/.config/gmail/gmail.py send "to@example.com" "Subject here" "Body here"
-```
+    TO="to@example.com"; SUBJ="Subject"; BODY="Body"
+    RAW=$(printf 'To: %s\nSubject: %s\nContent-Type: text/plain; charset=UTF-8\n\n%s' "$TO" "$SUBJ" "$BODY" \
+      | base64 | tr '+/' '-_' | tr -d '=\n')
+    gws gmail users messages send --params '{"userId":"me"}' --json "$(jq -nc --arg raw "$RAW" '{raw:$raw}')"
 
-### Send with attachments
+### Create a filter (auto-sort rule)
 
-```bash
-CLAUDECLAW_DIR=/path/to/claudeclaw ~/.venv/bin/python3 ~/.config/gmail/gmail.py send "to@example.com" "Subject" "Body" --attachments "/path/to/file.pdf,/path/to/other.xlsx"
-```
+    # Get $LABEL_ID via the Move recipe first
+    gws gmail users settings filters create --params '{"userId":"me"}' \
+      --json "$(jq -nc --arg lid "$LABEL_ID" '{criteria:{from:"sender@example.com"},action:{addLabelIds:[$lid],removeLabelIds:["INBOX"]}}')"
 
-### Create a Gmail filter (auto-sort rule)
-
-```bash
-CLAUDECLAW_DIR=/path/to/claudeclaw ~/.venv/bin/python3 ~/.config/gmail/gmail.py filter --from "sender@example.com" --label "LabelName" --archive --read
-```
-
-- `--from` / `--to` / `--subject` / `--query` for criteria
-- `--label` to apply a label, `--archive` to skip inbox, `--read` to mark as read, `--trash` to trash
-- Creates the label automatically if it doesn't exist
+Action keys: `addLabelIds`, `removeLabelIds` (use `INBOX` to archive, `UNREAD` to mark read), `forward`.
 
 ### List existing filters
 
-```bash
-CLAUDECLAW_DIR=/path/to/claudeclaw ~/.venv/bin/python3 ~/.config/gmail/gmail.py filters
-```
+    gws gmail users settings filters list --params '{"userId":"me"}'
 
-### Re-authenticate
+### Schema lookup when stuck
 
-```bash
-CLAUDECLAW_DIR=/path/to/claudeclaw ~/.venv/bin/python3 ~/.config/gmail/gmail.py auth
-```
+    gws schema gmail.users.messages.list
+    gws schema gmail.users.threads.get
 
-## Workflow
+## Workflow (default for "show me my email")
 
-1. Run `list --all` to show all inbox emails
-2. Display as a table with columns: #, Unread, From, Subject, Replies, Time
-3. Ask the user which to move and where
-4. Run `move` for each, confirm results
+1. Run threads list → get inbox grouped by thread
+2. Get metadata per thread (subject, from, last snippet)
+3. Display as the markdown table below
+4. Ask the user which to act on
+5. Execute moves/replies, confirm results
 
 ## Display Format
-
-Use a proper markdown table for the inbox:
 
 | # | Unread | From | Subject | Replies | Time |
 |---|--------|------|---------|---------|------|
 | 1 | * | someone@example.com | Re: Project update | 3 | 2h ago |
 | 2 | | newsletter@co.com | Your weekly digest | 1 | 5h ago |
 
-- **Replies** column shows `thread_count` (1 = single message, 2+ = thread)
-- Each row is one thread (conversation), not individual messages
+One row per thread, not per message. `Replies` = thread message count.
 
 ## Drafting Rules
 
 - Always draft email content and show the user before sending
-- Never send without confirmation
+- Never send without confirmation in that turn
+- For replies, preserve the thread (`threadId` + `In-Reply-To`)
 
-## One-Time Setup
+## Auth / re-scope
 
-If `credentials.json` is missing:
+    gws auth login -s gmail,calendar,drive,sheets,docs   # broaden scopes
+    gws auth status
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com)
-2. Create a project (or select existing)
-3. Enable the **Gmail API** (APIs & Services > Library)
-4. Go to APIs & Services > Credentials
-5. Create an **OAuth 2.0 Client ID** > Desktop app
-6. Download the JSON file
-7. Save it to the path in your `GOOGLE_CREDS_PATH` (default: `~/.config/gmail/credentials.json`)
-8. Run the `auth` command (see above)
-9. Browser opens, sign in, authorize, done
-
-## Error Handling
-
-- If `credentials.json` missing, show setup instructions above
-- If `token.json` missing, run auth automatically
-- If label not found, the script creates it
-- If any command fails, show the error and ask the user what to do
+After scope changes or `gws` upgrades, `rm ~/.config/gws/token_cache.json` to force a fresh access token.

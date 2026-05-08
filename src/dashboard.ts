@@ -1679,6 +1679,8 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       schedule?: string;
       skill?: string;
       title?: string;
+      silent_start?: boolean;
+      silent_result?: boolean;
     };
     const body = await c.req.json<CreateBody>().catch(() => ({} as CreateBody));
 
@@ -1686,6 +1688,8 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     const cron = (body?.cron || body?.schedule || '').trim();
     const agentId = (body?.agent_id || 'main').trim();
     const skill = (body?.skill || '').trim();
+    const silentStart = body?.silent_start === true;
+    const silentResult = body?.silent_result === true;
 
     if (!prompt) return c.json({ ok: false, error: 'prompt required' }, 400);
     if (prompt.length > 10000) return c.json({ ok: false, error: 'prompt too long (max 10000 chars)' }, 400);
@@ -1708,10 +1712,10 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     const fullPrompt = skill ? `[skill:${skill}] ${prompt}` : prompt;
 
     const id = crypto.randomBytes(4).toString('hex');
-    createScheduledTask(id, fullPrompt, cron, nextRun, agentId);
+    createScheduledTask(id, fullPrompt, cron, nextRun, agentId, silentStart, silentResult);
 
     insertAuditLog(agentId, 'dashboard', 'scheduled_task_created',
-      `id=${id} cron="${cron}" agent=${agentId}${skill ? ' skill=' + skill : ''}`, false);
+      `id=${id} cron="${cron}" agent=${agentId}${skill ? ' skill=' + skill : ''}${silentStart ? ' silent-start' : ''}${silentResult ? ' silent-result' : ''}`, false);
 
     const created = getAllScheduledTasks().find((t) => t.id === id);
     return c.json({ ok: true, task: created });
@@ -1733,12 +1737,14 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       prompt?: string;
       schedule?: string;
       agent_id?: string;
+      silent_start?: boolean;
+      silent_result?: boolean;
     };
     const all = getAllScheduledTasks();
     const existing = all.find((t) => t.id === id);
     if (!existing) return c.json({ ok: false, error: 'task not found' }, 404);
 
-    const patch: { prompt?: string; schedule?: string; nextRun?: number; agentId?: string } = {};
+    const patch: { prompt?: string; schedule?: string; nextRun?: number; agentId?: string; silentStart?: boolean; silentResult?: boolean } = {};
     if (typeof body.prompt === 'string') {
       const trimmed = body.prompt.trim();
       if (!trimmed) return c.json({ ok: false, error: 'prompt cannot be empty' }, 400);
@@ -1757,6 +1763,12 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       const agentId = body.agent_id.trim();
       if (!agentId) return c.json({ ok: false, error: 'agent_id cannot be empty' }, 400);
       patch.agentId = agentId;
+    }
+    if (typeof body.silent_start === 'boolean') {
+      patch.silentStart = body.silent_start;
+    }
+    if (typeof body.silent_result === 'boolean') {
+      patch.silentResult = body.silent_result;
     }
 
     updateScheduledTask(id, patch);

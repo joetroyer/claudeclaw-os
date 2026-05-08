@@ -399,6 +399,8 @@ interface QueueMissionAction {
   agent: string;
   title: string;
   prompt: string;
+  silent_start: boolean;
+  silent_result: boolean;
 }
 
 function extractQueueMission(actions: unknown[]): QueueMissionAction | null {
@@ -412,6 +414,8 @@ function extractQueueMission(actions: unknown[]): QueueMissionAction | null {
     agent: typeof x.agent === 'string' ? x.agent : '',
     title: typeof x.title === 'string' ? x.title : '',
     prompt: typeof x.prompt === 'string' ? x.prompt : '',
+    silent_start: x.silent_start === true,
+    silent_result: x.silent_result === true,
   };
 }
 
@@ -439,6 +443,8 @@ function WatcherFormModal({
   const [actionAgent, setActionAgent] = useState('main');
   const [actionTitle, setActionTitle] = useState('');
   const [actionPrompt, setActionPrompt] = useState('');
+  const [actionSilentStart, setActionSilentStart] = useState(false);
+  const [actionSilentResult, setActionSilentResult] = useState(false);
   const [advancedActionsLocked, setAdvancedActionsLocked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -456,6 +462,8 @@ function WatcherFormModal({
         setActionAgent(qm.agent || 'main');
         setActionTitle(qm.title);
         setActionPrompt(qm.prompt);
+        setActionSilentStart(qm.silent_start);
+        setActionSilentResult(qm.silent_result);
         setAdvancedActionsLocked(false);
       } else {
         // Existing actions list is more complex than the simple form
@@ -464,6 +472,8 @@ function WatcherFormModal({
         setActionAgent('main');
         setActionTitle('');
         setActionPrompt('');
+        setActionSilentStart(false);
+        setActionSilentResult(false);
         setAdvancedActionsLocked(true);
       }
     } else {
@@ -474,6 +484,8 @@ function WatcherFormModal({
       setActionAgent('main');
       setActionTitle('');
       setActionPrompt('');
+      setActionSilentStart(false);
+      setActionSilentResult(false);
       setAdvancedActionsLocked(false);
     }
     setErr(null);
@@ -512,15 +524,16 @@ function WatcherFormModal({
       // (non-queue-mission-only) action list, preserve it verbatim — we
       // never want this slice's simplified editor to clobber the YAML's
       // multi-step routing.
+      const qmEntry: Record<string, unknown> = {
+        agent: actionAgent.trim(),
+        title: actionTitle.trim(),
+        prompt: actionPrompt.trim(),
+      };
+      if (actionSilentStart) qmEntry.silent_start = true;
+      if (actionSilentResult) qmEntry.silent_result = true;
       const actions: unknown[] = advancedActionsLocked && existing
         ? existing.actions
-        : [{
-            'queue-mission': {
-              agent: actionAgent.trim(),
-              title: actionTitle.trim(),
-              prompt: actionPrompt.trim(),
-            },
-          }];
+        : [{ 'queue-mission': qmEntry }];
 
       if (isEdit && existing) {
         await apiPut(`/api/watchers/${existing.slug}`, {
@@ -722,6 +735,34 @@ function WatcherFormModal({
                   class="w-full px-3 py-2 rounded bg-[var(--color-bg)] border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none text-[12.5px] text-[var(--color-text)] font-mono resize-y"
                 />
               </div>
+              <label class="flex items-start gap-2 cursor-pointer select-none pt-1">
+                <input
+                  type="checkbox"
+                  checked={actionSilentStart}
+                  onChange={(e) => setActionSilentStart((e.target as HTMLInputElement).checked)}
+                  class="mt-0.5 cursor-pointer accent-[var(--color-accent)]"
+                />
+                <span class="flex-1">
+                  <span class="block text-[12px] text-[var(--color-text)]">Silent start</span>
+                  <span class="block text-[10.5px] text-[var(--color-text-faint)] leading-snug mt-0.5">
+                    Don't pre-announce when this fires. (Mission tasks have no pre-announce yet — set anyway for forward-compat.)
+                  </span>
+                </span>
+              </label>
+              <label class="flex items-start gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={actionSilentResult}
+                  onChange={(e) => setActionSilentResult((e.target as HTMLInputElement).checked)}
+                  class="mt-0.5 cursor-pointer accent-[var(--color-accent)]"
+                />
+                <span class="flex-1">
+                  <span class="block text-[12px] text-[var(--color-text)]">Silent result</span>
+                  <span class="block text-[10.5px] text-[var(--color-text-faint)] leading-snug mt-0.5">
+                    Suppress the result message on Telegram. Output saves to Mission Control. Errors and timeouts still ping.
+                  </span>
+                </span>
+              </label>
             </div>
           )}
         </div>

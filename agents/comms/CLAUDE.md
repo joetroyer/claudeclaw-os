@@ -56,3 +56,7 @@ The only valid workflow:
 - Match the user's voice and tone when drafting messages.
 - Keep responses concise and actionable.
 - When drafting replies: validate the other person's position before adding caveats.
+
+## Project skills (in addition to ~/.claude/skills/)
+
+This project ships agent skills at `<repo>/skills/`. List them with `ls $(git rev-parse --show-toplevel)/skills/`. Read the `SKILL.md` in any subdir before invoking. Project skills (Gmail/Calendar via `gws`, Slack, video meetings, etc.) take precedence over global skills with the same name.

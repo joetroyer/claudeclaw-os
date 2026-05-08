@@ -70,14 +70,16 @@ let db: Database.Database;
 function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
-      id          TEXT PRIMARY KEY,
-      prompt      TEXT NOT NULL,
-      schedule    TEXT NOT NULL,
-      next_run    INTEGER NOT NULL,
-      last_run    INTEGER,
-      last_result TEXT,
-      status      TEXT NOT NULL DEFAULT 'active',
-      created_at  INTEGER NOT NULL
+      id            TEXT PRIMARY KEY,
+      prompt        TEXT NOT NULL,
+      schedule      TEXT NOT NULL,
+      next_run      INTEGER NOT NULL,
+      last_run      INTEGER,
+      last_result   TEXT,
+      status        TEXT NOT NULL DEFAULT 'active',
+      created_at    INTEGER NOT NULL,
+      silent_start  INTEGER NOT NULL DEFAULT 0,
+      silent_result INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE INDEX IF NOT EXISTS idx_tasks_next_run ON scheduled_tasks(status, next_run);
@@ -228,7 +230,9 @@ function createSchema(database: Database.Database): void {
       priority        INTEGER NOT NULL DEFAULT 0,
       created_at      INTEGER NOT NULL,
       started_at      INTEGER,
-      completed_at    INTEGER
+      completed_at    INTEGER,
+      silent_start    INTEGER NOT NULL DEFAULT 0,
+      silent_result   INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE INDEX IF NOT EXISTS idx_mission_status
@@ -554,6 +558,12 @@ function runMigrations(database: Database.Database): void {
   if (!taskColNames.includes('last_status')) {
     database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN last_status TEXT`);
   }
+  if (!taskColNames.includes('silent_start')) {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN silent_start INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!taskColNames.includes('silent_result')) {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN silent_result INTEGER NOT NULL DEFAULT 0`);
+  }
 
   // ── Memory V2 migration ──────────────────────────────────────────────
   // Detect old schema (has 'sector' column but no 'importance') and migrate.
@@ -746,6 +756,9 @@ function runMigrations(database: Database.Database): void {
   // stay untouched and the dashboard can filter. The existing `mode` column
   // on warroom_meetings is voice-only semantics (direct|auto) and can't
   // double as meeting-type.
+  addColumnIfMissing(database, 'mission_tasks', 'silent_start', `INTEGER NOT NULL DEFAULT 0`);
+  addColumnIfMissing(database, 'mission_tasks', 'silent_result', `INTEGER NOT NULL DEFAULT 0`);
+
   addColumnIfMissing(database, 'warroom_meetings', 'meeting_type', `TEXT NOT NULL DEFAULT 'voice'`);
 
   // Text War Room hive-mind: chat_id on warroom_meetings so a text meeting
@@ -1428,6 +1441,8 @@ export interface ScheduledTask {
   agent_id: string;
   started_at: number | null;
   last_status: 'success' | 'failed' | 'timeout' | null;
+  silent_start: number;
+  silent_result: number;
 }
 
 export function createScheduledTask(
@@ -1436,12 +1451,22 @@ export function createScheduledTask(
   schedule: string,
   nextRun: number,
   agentId = 'main',
+  silentStart = false,
+  silentResult = false,
 ): void {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
-    `INSERT INTO scheduled_tasks (id, prompt, schedule, next_run, status, created_at, agent_id)
-     VALUES (?, ?, ?, ?, 'active', ?, ?)`,
-  ).run(id, prompt, schedule, nextRun, now, agentId);
+    `INSERT INTO scheduled_tasks (id, prompt, schedule, next_run, status, created_at, agent_id, silent_start, silent_result)
+     VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+  ).run(id, prompt, schedule, nextRun, now, agentId, silentStart ? 1 : 0, silentResult ? 1 : 0);
+}
+
+export function setScheduledTaskSilent(id: string, silent: boolean): void {
+  db.prepare(`UPDATE scheduled_tasks SET silent_start = ? WHERE id = ?`).run(silent ? 1 : 0, id);
+}
+
+export function setScheduledTaskSilentResult(id: string, silent: boolean): void {
+  db.prepare(`UPDATE scheduled_tasks SET silent_result = ? WHERE id = ?`).run(silent ? 1 : 0, id);
 }
 
 export function getDueTasks(agentId = 'main'): ScheduledTask[] {
@@ -1513,7 +1538,7 @@ export function deleteScheduledTask(id: string): void {
  */
 export function updateScheduledTask(
   id: string,
-  patch: { prompt?: string; schedule?: string; nextRun?: number; agentId?: string },
+  patch: { prompt?: string; schedule?: string; nextRun?: number; agentId?: string; silentStart?: boolean; silentResult?: boolean },
 ): void {
   const sets: string[] = [];
   const vals: any[] = [];
@@ -1521,6 +1546,8 @@ export function updateScheduledTask(
   if (patch.schedule !== undefined) { sets.push('schedule = ?'); vals.push(patch.schedule); }
   if (patch.nextRun !== undefined) { sets.push('next_run = ?'); vals.push(patch.nextRun); }
   if (patch.agentId !== undefined) { sets.push('agent_id = ?'); vals.push(patch.agentId); }
+  if (patch.silentStart !== undefined) { sets.push('silent_start = ?'); vals.push(patch.silentStart ? 1 : 0); }
+  if (patch.silentResult !== undefined) { sets.push('silent_result = ?'); vals.push(patch.silentResult ? 1 : 0); }
   if (sets.length === 0) return;
   vals.push(id);
   db.prepare(`UPDATE scheduled_tasks SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
@@ -2460,6 +2487,8 @@ export interface MissionTask {
   created_at: number;
   started_at: number | null;
   completed_at: number | null;
+  silent_start: number;
+  silent_result: number;
 }
 
 export function createMissionTask(
@@ -2469,12 +2498,24 @@ export function createMissionTask(
   assignedAgent: string | null = null,
   createdBy = 'dashboard',
   priority = 0,
+  silentStart = false,
+  silentResult = false,
 ): void {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
-    `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, created_by, priority, created_at)
-     VALUES (?, ?, ?, ?, 'queued', ?, ?, ?)`,
-  ).run(id, title, prompt, assignedAgent, createdBy, priority, now);
+    `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, created_by, priority, created_at, silent_start, silent_result)
+     VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)`,
+  ).run(id, title, prompt, assignedAgent, createdBy, priority, now, silentStart ? 1 : 0, silentResult ? 1 : 0);
+}
+
+export function setMissionTaskSilent(id: string, silentStart?: boolean, silentResult?: boolean): void {
+  const sets: string[] = [];
+  const vals: any[] = [];
+  if (silentStart !== undefined) { sets.push('silent_start = ?'); vals.push(silentStart ? 1 : 0); }
+  if (silentResult !== undefined) { sets.push('silent_result = ?'); vals.push(silentResult ? 1 : 0); }
+  if (sets.length === 0) return;
+  vals.push(id);
+  db.prepare(`UPDATE mission_tasks SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
 }
 
 export function getUnassignedMissionTasks(): MissionTask[] {

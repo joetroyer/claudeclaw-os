@@ -12,6 +12,8 @@ interface ScheduledTask {
   schedule: string;
   next_run: number;
   agent_id: string;
+  silent_start?: number;
+  silent_result?: number;
 }
 
 interface AgentLite { id: string; name: string }
@@ -35,6 +37,8 @@ export function EditTaskModal({ open, task, onClose, onSaved }: Props) {
   const [prompt, setPrompt] = useState('');
   const [schedule, setSchedule] = useState('');
   const [agentId, setAgentId] = useState('');
+  const [silentStart, setSilentStart] = useState(false);
+  const [silentResult, setSilentResult] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const agentsFetch = useFetch<{ agents: AgentLite[] }>(open ? '/api/agents' : null);
@@ -44,11 +48,21 @@ export function EditTaskModal({ open, task, onClose, onSaved }: Props) {
     setPrompt(task.prompt);
     setSchedule(task.schedule);
     setAgentId(task.agent_id);
+    setSilentStart(!!task.silent_start);
+    setSilentResult(!!task.silent_result);
     setErr(null);
   }, [task?.id]);
 
   const cronPreview = useMemo(() => describeCron(schedule), [schedule]);
-  const dirty = task ? (prompt !== task.prompt || schedule !== task.schedule || agentId !== task.agent_id) : false;
+  const taskSilent = !!task?.silent_start;
+  const taskSilentResult = !!task?.silent_result;
+  const dirty = task
+    ? (prompt !== task.prompt
+        || schedule !== task.schedule
+        || agentId !== task.agent_id
+        || silentStart !== taskSilent
+        || silentResult !== taskSilentResult)
+    : false;
 
   async function save() {
     if (!task) return;
@@ -59,6 +73,8 @@ export function EditTaskModal({ open, task, onClose, onSaved }: Props) {
       if (prompt !== task.prompt) patch.prompt = prompt;
       if (schedule !== task.schedule) patch.schedule = schedule;
       if (agentId !== task.agent_id) patch.agent_id = agentId;
+      if (silentStart !== taskSilent) patch.silent_start = silentStart;
+      if (silentResult !== taskSilentResult) patch.silent_result = silentResult;
       await apiPatch(`/api/tasks/${task.id}`, patch);
       pushToast({ tone: 'success', title: 'Task updated' });
       onSaved();
@@ -157,6 +173,36 @@ export function EditTaskModal({ open, task, onClose, onSaved }: Props) {
               : <option value={agentId}>@{agentId}</option>}
           </select>
         </div>
+
+        <label class="flex items-start gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={silentStart}
+            onChange={(e) => setSilentStart((e.target as HTMLInputElement).checked)}
+            class="mt-0.5 cursor-pointer accent-[var(--color-accent)]"
+          />
+          <span class="flex-1">
+            <span class="block text-[12.5px] text-[var(--color-text)]">Silent start</span>
+            <span class="block text-[11px] text-[var(--color-text-faint)] leading-snug mt-0.5">
+              Skip the "Scheduled task running…" Telegram pre-announce. The result, errors, and timeouts still ping.
+            </span>
+          </span>
+        </label>
+
+        <label class="flex items-start gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={silentResult}
+            onChange={(e) => setSilentResult((e.target as HTMLInputElement).checked)}
+            class="mt-0.5 cursor-pointer accent-[var(--color-accent)]"
+          />
+          <span class="flex-1">
+            <span class="block text-[12.5px] text-[var(--color-text)]">Silent result</span>
+            <span class="block text-[11px] text-[var(--color-text-faint)] leading-snug mt-0.5">
+              Suppress the result message on Telegram. Output still saves to the dashboard. Errors and timeouts still ping.
+            </span>
+          </span>
+        </label>
 
         {err && (
           <div class="text-[11.5px] text-[var(--color-status-failed)] bg-[var(--color-status-failed-soft,_rgba(255,0,0,0.08))] border border-[var(--color-status-failed)] rounded px-2 py-1.5">

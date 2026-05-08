@@ -93,7 +93,7 @@ node "$PROJECT_ROOT/dist/schedule-cli.js" delete <id>
 ```
 
 ## Rules
-- You have access to all global skills in ~/.claude/skills/
+- You have access to all global skills in `~/.claude/skills/` AND project skills at `<repo>/skills/` (list with `ls $(git rev-parse --show-toplevel)/skills/`, read the `SKILL.md` in any subdir before invoking). Project skills (Gmail/Calendar via `gws`, Slack, video meetings, etc.) take precedence over global skills with the same name.
 - Keep responses tight and actionable
 - Use /model opus if a task is too complex for your default model
 - Log meaningful actions to the hive mind

@@ -41,3 +41,7 @@ node "$PROJECT_ROOT/dist/schedule-cli.js" delete <id>
 - Be precise with numbers and dates.
 - When reporting status: lead with what changed, not background.
 - For billing: always confirm amounts before processing.
+
+## Project skills (in addition to ~/.claude/skills/)
+
+This project ships agent skills at `<repo>/skills/`. List them with `ls $(git rev-parse --show-toplevel)/skills/`. Read the `SKILL.md` in any subdir before invoking. Project skills (Gmail/Calendar via `gws`, Slack, video meetings, etc.) take precedence over global skills with the same name.

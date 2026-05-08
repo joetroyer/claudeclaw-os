@@ -42,3 +42,7 @@ node "$PROJECT_ROOT/dist/schedule-cli.js" delete <id>
 - Lead with the hook or key insight, not the process.
 - When drafting scripts: match the user's voice and energy.
 - For research: surface actionable angles, not just facts.
+
+## Project skills (in addition to ~/.claude/skills/)
+
+This project ships agent skills at `<repo>/skills/`. List them with `ls $(git rev-parse --show-toplevel)/skills/`. Read the `SKILL.md` in any subdir before invoking. Project skills (Gmail/Calendar via `gws`, Slack, video meetings, etc.) take precedence over global skills with the same name.

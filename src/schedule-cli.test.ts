@@ -18,7 +18,7 @@ describe('schedule-cli agent routing', () => {
       { ...process.env, CLAUDECLAW_AGENT_ID: 'comms' },
     );
 
-    expect(result).toContain('Agent:        comms');
+    expect(result).toContain('Agent:         comms');
   });
 
   it('--agent flag overrides CLAUDECLAW_AGENT_ID env var', () => {
@@ -27,7 +27,7 @@ describe('schedule-cli agent routing', () => {
       { ...process.env, CLAUDECLAW_AGENT_ID: 'comms' },
     );
 
-    expect(result).toContain('Agent:        ops');
+    expect(result).toContain('Agent:         ops');
   });
 
   it('defaults to main when no env var and no --agent flag', () => {
@@ -36,7 +36,7 @@ describe('schedule-cli agent routing', () => {
       { ...process.env, CLAUDECLAW_AGENT_ID: undefined },
     );
 
-    expect(result).toContain('Agent:        main');
+    expect(result).toContain('Agent:         main');
   });
 
   // Track task IDs created during tests for targeted cleanup

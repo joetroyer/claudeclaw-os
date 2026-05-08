@@ -37,3 +37,7 @@ node "$PROJECT_ROOT/dist/schedule-cli.js" delete <id>
 - Always cite sources with links when available.
 - Flag confidence level: high/medium/low based on source quality.
 - For comparisons: use tables. For timelines: use chronological lists.
+
+## Project skills (in addition to ~/.claude/skills/)
+
+This project ships agent skills at `<repo>/skills/`. List them with `ls $(git rev-parse --show-toplevel)/skills/`. Read the `SKILL.md` in any subdir before invoking. Project skills (Gmail/Calendar via `gws`, Slack, video meetings, etc.) take precedence over global skills with the same name.

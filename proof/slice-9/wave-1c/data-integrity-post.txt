@@ -1,0 +1,28 @@
+=== scheduled_tasks schema (live DB) ===
+CREATE TABLE scheduled_tasks (
+      id          TEXT PRIMARY KEY,
+      prompt      TEXT NOT NULL,
+      schedule    TEXT NOT NULL,
+      next_run    INTEGER NOT NULL,
+      last_run    INTEGER,
+      last_result TEXT,
+      status      TEXT NOT NULL DEFAULT 'active',
+      created_at  INTEGER NOT NULL
+    , agent_id TEXT NOT NULL DEFAULT 'main', started_at INTEGER, last_status TEXT, silent_start INTEGER NOT NULL DEFAULT 0, silent_result INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX idx_tasks_next_run ON scheduled_tasks(status, next_run);
+
+=== scheduled_tasks row count ===
+1
+
+=== scheduled_tasks sample (first 5 rows, prompt truncated) ===
+id|prompt_head|schedule|agent_id|status|last_status|last_run|next_run
+ef425086|Open gmail via google cli for joetroyer@|15 6 * * *|comms|active|success|1778235401|1778321700
+
+=== mission_tasks row count ===
+87
+
+=== /api/tasks endpoint smoke (running dashboard, :3141) ===
+tasks returned: 1
+keys per row: ['agent_id', 'created_at', 'id', 'last_result', 'last_run', 'last_status', 'next_run', 'prompt', 'schedule', 'silent_result', 'silent_start', 'started_at', 'status']
+
+=== captured at 2026-05-08T11:30:56-04:00 ===

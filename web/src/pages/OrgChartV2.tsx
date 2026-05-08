@@ -316,6 +316,9 @@ export function OrgChartV2() {
   // Track whether we've applied default open-state. We open all roots by
   // default if no stored / URL state told us otherwise. This runs once
   // after the initial fetch resolves.
+  // Slice 10 Wave 4 — default depth bumped from 2 → 3. Joe sees most
+  // of the org without clicking; matches Callan's reference where the
+  // first frame already shows the leadership tier expanded.
   const defaultedRef = useRef(false);
   useEffect(() => {
     if (defaultedRef.current) return;
@@ -329,8 +332,17 @@ export function OrgChartV2() {
       defaultedRef.current = true;
       return;
     }
-    // Default expansion: every root open (depth-2 visible).
-    setExpanded(new Set(roots.map((r) => r.id)));
+    // Default expansion: every node up to depth 3 visible. Walks the
+    // tree once and sets all nodes whose own depth is ≤ 2 (since a
+    // node's "open" state means its children are visible — opening
+    // depth-2 nodes makes the depth-3 row of children show up).
+    const next = new Set<string>();
+    function walk(n: TreeNode) {
+      if (n.depth <= 2) next.add(n.id);
+      for (const c of n.children) walk(c);
+    }
+    for (const r of roots) walk(r);
+    setExpanded(next);
     defaultedRef.current = true;
   }, [roots]);
 
@@ -345,6 +357,78 @@ export function OrgChartV2() {
   useEffect(() => {
     writeUrlState(focusId, Array.from(expanded));
   }, [focusId, expanded]);
+
+  // Slice 10 Wave 4 — auto-fit the tree when its natural width exceeds
+  // the canvas. Mirrors Callan's reference (her 0:36s frame zooms the
+  // whole 17-node chart down so it fits a single screen).
+  //
+  // Approach: measure the inner column's natural width, then if it
+  // overflows, apply CSS transform: scale() AND set a negative margin
+  // so the post-transform layout space matches the visual size. This
+  // dodges the gotcha that `transform` doesn't change layout box, so
+  // without the margin the parent still thinks the tree is huge.
+  const treeInnerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function recompute() {
+      const canvas = document.querySelector('[data-testid="org-chart-v2-canvas"]') as HTMLElement | null;
+      const inner = treeInnerRef.current;
+      if (!canvas || !inner) return;
+      // Clear transform + margins before measuring.
+      inner.style.transform = '';
+      inner.style.marginLeft = '';
+      inner.style.marginRight = '';
+      inner.style.marginBottom = '';
+      // Skip auto-scaling on mobile (CSS falls back to a vertical
+      // stack <640px so the natural width is fine).
+      if (window.matchMedia('(max-width: 639.5px)').matches) {
+        inner.dataset.autoScale = '1';
+        return;
+      }
+      const naturalWidth = inner.scrollWidth;
+      const naturalHeight = inner.scrollHeight;
+      const visible = canvas.clientWidth - 16;
+      if (naturalWidth <= visible) {
+        inner.dataset.autoScale = '1';
+        return;
+      }
+      // Don't shrink below 0.42 so cards stay legible. Below that we
+      // allow horizontal scroll on the canvas for the remainder.
+      const ratio = Math.max(0.42, visible / naturalWidth);
+      inner.style.transform = `scale(${ratio.toFixed(3)})`;
+      inner.dataset.autoScale = ratio.toFixed(3);
+      // Compensate for the layout box not shrinking with transform.
+      // Negative side margins of (1-ratio)/2 * naturalWidth on each
+      // side pull the visual width down to match the scaled content.
+      // Bottom margin pulls following content up by the height delta.
+      const mx = (1 - ratio) * naturalWidth / 2;
+      const mb = (1 - ratio) * naturalHeight;
+      inner.style.marginLeft = `-${mx}px`;
+      inner.style.marginRight = `-${mx}px`;
+      inner.style.marginBottom = `-${mb}px`;
+      // After scale + margin compensation, center the canvas's scroll
+      // on the topmost root (joe) so the founder is visible regardless
+      // of how the subtree skews left/right.
+      requestAnimationFrame(() => {
+        const rootId = roots[0]?.id;
+        if (!rootId) { canvas.scrollLeft = 0; return; }
+        const rootEl = canvas.querySelector(`[data-org-node-id="${CSS.escape(rootId)}"]`) as HTMLElement | null;
+        if (!rootEl) { canvas.scrollLeft = 0; return; }
+        const cR = canvas.getBoundingClientRect();
+        const rR = rootEl.getBoundingClientRect();
+        const rootCenter = rR.left + rR.width / 2 - cR.left + canvas.scrollLeft;
+        canvas.scrollLeft = Math.max(0, rootCenter - cR.width / 2);
+      });
+    }
+    // First paint after the children DOM has settled, then resize.
+    const raf1 = requestAnimationFrame(recompute);
+    const raf2 = requestAnimationFrame(() => requestAnimationFrame(recompute));
+    window.addEventListener('resize', recompute);
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      window.removeEventListener('resize', recompute);
+    };
+  }, [roots, expanded, focusId]);
 
   // Search.
   const [searchRaw, setSearchRaw] = useState('');
@@ -569,18 +653,26 @@ export function OrgChartV2() {
 
       {!loading && !error && roots.length > 0 && (
         <div
-          class="flex-1 overflow-y-auto p-4 sm:p-6"
+          class="flex-1 overflow-y-auto org-chart-canvas-scroll p-3 sm:p-4"
           onClick={(e) => {
             // Click on the empty background (not on a card) exits focus.
             if (e.target === e.currentTarget && focusId) exitFocus();
           }}
           data-testid="org-chart-v2-canvas"
         >
-          {/* Center the tree in a max-width column so cards don't sprawl
-              across ultra-wide displays. The tree itself is left-aligned
-              within this column. */}
-          <div class="mx-auto max-w-[1200px]">
-            <div class="space-y-3">
+          {/* Slice 10 Wave 4 — horizontal sibling layout. When the
+              natural tree width exceeds the canvas we auto-scale the
+              inner column down (mirrors Callan's zoomed-out chart) so
+              the full 17-node tree lands on one screen without scroll.
+              transform-origin: top means the scale anchors at the top
+              centre, keeping the founder card in the same vertical spot. */}
+          <div
+            ref={treeInnerRef}
+            class="inline-flex flex-col items-center min-w-full"
+            style={{ transformOrigin: 'top center' }}
+            data-testid="org-chart-v2-tree-inner"
+          >
+            <div class="flex flex-row items-start justify-center gap-4">
               {rootsToRender().map((r) => (
                 <NodeBranch
                   key={r.id}
@@ -864,8 +956,12 @@ function NodeBranch(p: BranchProps) {
   })();
   const highlighted = !!p.matchSet?.has(p.node.id);
 
+  // Slice 10 Wave 4 — horizontal sibling layout. Each subtree is a
+  // flex column: parent card on top, a short vertical trunk, then a
+  // flex row of children. The pseudo-elements on .org-chart-child draw
+  // the horizontal bus + short verticals down to each child card.
   return (
-    <div class="org-chart-branch">
+    <div class="org-chart-subtree">
       <NodeCard
         node={p.node}
         isOpen={isOpen}
@@ -882,16 +978,19 @@ function NodeBranch(p: BranchProps) {
         onMenu={p.onMenu}
       />
       {isOpen && hasChildren && (
-        <div
-          class="org-chart-children mt-2 ml-5 sm:ml-7 space-y-3"
-          data-testid={`org-chart-v2-children-${p.node.id}`}
-        >
-          {p.node.children.map((c) => (
-            <div key={c.id} class="org-chart-child-rail">
-              <NodeBranch {...p} node={c} />
-            </div>
-          ))}
-        </div>
+        <>
+          <div class="org-chart-trunk" aria-hidden="true" />
+          <div
+            class="org-chart-children-row"
+            data-testid={`org-chart-v2-children-${p.node.id}`}
+          >
+            {p.node.children.map((c) => (
+              <div key={c.id} class="org-chart-child">
+                <NodeBranch {...p} node={c} />
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
@@ -936,22 +1035,31 @@ function NodeCard(p: CardProps) {
 
   const reportCount = p.node.children.length;
   const aiReportCount = p.node.children.filter((c) => c.type === 'ai').length;
+  const humanReportCount = reportCount - aiReportCount;
   const scheduled = p.node.scheduled_count || p.node.owns.scheduled_tasks.length || 0;
   const triggered = p.node.triggered_count || p.node.owns.triggered_tasks.length || 0;
 
   const isHuman = p.node.type === 'human';
   const primarySkills = p.node.skills?.primary ?? [];
   const visibleSkills = primarySkills.slice(0, 3);
-  const overflowSkills = primarySkills.length - visibleSkills.length;
+  // Slice 10 Wave 4 — Four-Rs preview. First responsibility line below
+  // the role gives the eye a glance of what this node actually does
+  // without opening the drawer. Truncated to ~50 chars to keep cards
+  // dense; the full list lives in the drawer.
+  const firstResp =
+    Array.isArray(p.node.four_rs?.responsibilities) && p.node.four_rs.responsibilities.length > 0
+      ? p.node.four_rs.responsibilities[0]
+      : '';
 
+  // Slice 10 Wave 4 — compact 220px card form factor. Targets ~5
+  // siblings per row at 1280px (5 × 220 + 4 × 8 = 1132px, within
+  // the canvas after sidenav). Two-row card height. Mobile gets a
+  // fluid full-width fallback so cards don't get clipped.
   return (
     <div
       class={[
-        'org-chart-card relative rounded-md border bg-[var(--color-card)] transition-all',
-        // Fixed compact width per Wave 2 spec — never stretches to fill
-        // the surrounding column. Mobile (<400px) gets a fluid w-full so
-        // the card still hits the viewport edges cleanly.
-        'w-full sm:w-[380px] sm:max-w-[380px]',
+        'org-chart-card relative rounded-lg border bg-[var(--color-card)] transition-all shadow-sm',
+        'w-[220px] max-w-[220px]',
         p.dimmed ? 'opacity-40' : 'opacity-100',
         p.highlighted ? 'ring-2 ring-[var(--color-accent)]' : '',
         'border-[var(--color-border)] hover:border-[var(--color-border-strong)]',
@@ -961,40 +1069,23 @@ function NodeCard(p: CardProps) {
       data-node-type={p.node.type}
       data-node-lob={p.node.lob ?? ''}
     >
-      {/* ── header row: chevron · avatar · (name + role + chips + lob) · type badge · menu ── */}
-      <div class="flex items-start gap-2 px-3 pt-3 pb-2">
-        {p.hasChildren ? (
-          <button
-            type="button"
-            onClick={p.onToggle}
-            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center -ml-1 text-[var(--color-text-faint)] hover:text-[var(--color-text)] transition-colors shrink-0"
-            aria-expanded={p.isOpen}
-            aria-label={p.isOpen ? 'Collapse' : 'Expand'}
-            data-testid={`org-chart-v2-toggle-${p.node.id}`}
-          >
-            {p.isOpen
-              ? <ChevronDown size={14} />
-              : <ChevronRight size={14} />}
-          </button>
-        ) : (
-          <div class="w-3 shrink-0" />
-        )}
-
+      {/* ── header row: avatar + name + menu ── */}
+      <div class="flex items-start gap-1.5 px-2 pt-2 pb-1">
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); p.onAvatar(); }}
           class="shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center hover:opacity-90 transition-opacity"
           aria-label={`Open ${p.node.name} profile`}
         >
-          <AgentAvatar agentId={p.node.id} name={p.node.name} size={40} running={p.node.running ?? undefined} src={p.node.avatar || undefined} />
+          <AgentAvatar agentId={p.node.id} name={p.node.name} size={32} running={p.node.running ?? undefined} src={p.node.avatar || undefined} />
         </button>
 
-        <div class="flex-1 min-w-0">
-          <div class="flex items-start gap-2">
+        <div class="flex-1 min-w-0 pt-0.5">
+          <div class="flex items-center gap-1 min-w-0">
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); p.onTitle(); }}
-              class="flex-1 min-w-0 min-h-[44px] inline-flex items-center text-[14px] font-semibold text-[var(--color-text)] hover:text-[var(--color-accent)] transition-colors text-left truncate"
+              class="flex-1 min-w-0 min-h-[28px] inline-flex items-center text-[13px] font-semibold leading-tight text-[var(--color-text)] hover:text-[var(--color-accent)] transition-colors text-left truncate"
               data-testid={`org-chart-v2-title-${p.node.id}`}
               title={p.node.name}
             >
@@ -1006,81 +1097,35 @@ function NodeCard(p: CardProps) {
               data-testid={`org-chart-v2-badge-${p.node.id}`}
               aria-label={`Filter to ${p.node.type}`}
               title={`Filter to ${isHuman ? 'humans' : 'AI'}`}
-              class="shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center px-2 rounded hover:bg-[var(--color-elevated)] transition-colors group"
+              class="shrink-0 min-h-[28px] min-w-[28px] inline-flex items-center justify-center rounded hover:bg-[var(--color-elevated)] transition-colors"
             >
-              <Pill tone={isHuman ? 'neutral' : 'accent'}>
-                <span class="inline-flex items-center gap-1">
-                  {isHuman ? <User size={9} /> : <Bot size={9} />}
-                  {isHuman ? 'Human' : 'AI'}
-                  <Filter
-                    size={8}
-                    class="opacity-0 group-hover:opacity-60 transition-opacity"
-                  />
-                </span>
-              </Pill>
+              {isHuman
+                ? <User size={11} class="text-[var(--color-text-faint)]" />
+                : <Bot size={11} class="text-[var(--color-accent)]" />}
             </button>
           </div>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); p.onSubtitle(); }}
-            class="block w-full min-h-[44px] text-[12px] leading-snug text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors text-left line-clamp-2 py-1"
+            class="block w-full min-h-[16px] text-[11px] leading-snug text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors text-left truncate"
             data-testid={`org-chart-v2-subtitle-${p.node.id}`}
+            title={p.node.role || 'no role set'}
           >
             {p.node.role || 'no role set'}
           </button>
-
-          {/* skill chips — max 3 visible, "+N" affordance */}
-          {visibleSkills.length > 0 && (
-            <div
-              class="mt-1.5 flex flex-wrap gap-1"
-              data-testid={`org-chart-v2-skills-${p.node.id}`}
-            >
-              {visibleSkills.map((s) => (
-                <span
-                  key={s}
-                  class="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] border border-[var(--color-border)]"
-                  title={s}
-                >
-                  {s}
-                </span>
-              ))}
-              {overflowSkills > 0 && (
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); p.onSubtitle(); }}
-                  class="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded bg-[var(--color-elevated)] text-[var(--color-text-faint)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
-                  aria-label={`${overflowSkills} more skill${overflowSkills === 1 ? '' : 's'}`}
-                  data-testid={`org-chart-v2-skills-more-${p.node.id}`}
-                >
-                  +{overflowSkills}
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* lob tag — small, low-emphasis under the chips */}
-          {p.node.lob && (
-            <div
-              class="mt-1 flex items-center gap-1 text-[10px]"
-              data-testid={`org-chart-v2-lob-${p.node.id}`}
-            >
-              <span class="uppercase tracking-wider text-[var(--color-text-faint)]">lob</span>
-              <span class="text-[var(--color-text-muted)]">{p.node.lob}</span>
-            </div>
-          )}
         </div>
 
-        <div class="relative shrink-0 -mr-1" ref={menuRef}>
+        <div class="relative shrink-0" ref={menuRef}>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}
-            class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-full bg-[var(--color-elevated)] text-[var(--color-text-faint)] hover:text-[var(--color-text)] hover:bg-[var(--color-accent-soft)] transition-colors"
+            class="min-h-[28px] min-w-[28px] inline-flex items-center justify-center rounded-full text-[var(--color-text-faint)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
             aria-label="Card actions"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             data-testid={`org-chart-v2-menu-${p.node.id}`}
           >
-            <MoreHorizontal size={14} />
+            <MoreHorizontal size={12} />
           </button>
           {menuOpen && (
             <div
@@ -1119,66 +1164,114 @@ function NodeCard(p: CardProps) {
         </div>
       </div>
 
-      {/* ── footer: nav-counts on row 1, cadence + menu hint on row 2 ── */}
-      <div class="border-t border-[var(--color-border)] px-3 py-1.5 text-[11px] text-[var(--color-text-faint)] space-y-0.5">
-        {(reportCount > 0 || aiReportCount > 0) && (
-          <div class="flex flex-wrap items-center gap-x-3">
-            {reportCount > 0 && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!p.isOpen) p.onToggle();
-                }}
-                class="cursor-pointer min-h-[28px] inline-flex items-center gap-1 hover:text-[var(--color-accent)] transition-colors group"
-                data-testid={`org-chart-v2-reports-${p.node.id}`}
-                aria-label={`Show ${reportCount} report${reportCount === 1 ? '' : 's'}`}
-              >
-                {p.isOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-                <span>{reportCount} report{reportCount === 1 ? '' : 's'}</span>
-              </button>
-            )}
-            {aiReportCount > 0 && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!p.isOpen) p.onToggle();
-                }}
-                class="cursor-pointer min-h-[28px] inline-flex items-center gap-1 hover:text-[var(--color-accent)] transition-colors"
-                data-testid={`org-chart-v2-ai-reports-${p.node.id}`}
-                aria-label={`Show ${aiReportCount} AI employee${aiReportCount === 1 ? '' : 's'}`}
-              >
-                <Bot size={10} />
-                <span>{aiReportCount} AI Emp</span>
-              </button>
-            )}
-          </div>
-        )}
-        <div class="flex flex-wrap items-center gap-x-3">
+      {/* ── body: first-resp preview + skills + LOB on their own rows
+          so they don't compete with the name for horizontal space ── */}
+      {(firstResp || visibleSkills.length > 0 || p.node.lob) && (
+        <div class="px-2 pb-1.5 space-y-0.5">
+          {firstResp && (
+            <div
+              class="text-[10px] leading-snug text-[var(--color-text-faint)] line-clamp-1"
+              data-testid={`org-chart-v2-resp-${p.node.id}`}
+              title={firstResp}
+            >
+              {firstResp}
+            </div>
+          )}
+          {(visibleSkills.length > 0 || p.node.lob) && (
+            <div class="flex flex-wrap items-center gap-0.5">
+              {visibleSkills.length > 0 && (
+                <div
+                  class="inline-flex flex-wrap gap-0.5"
+                  data-testid={`org-chart-v2-skills-${p.node.id}`}
+                >
+                  {visibleSkills.map((s) => (
+                    <span
+                      key={s}
+                      class="inline-flex items-center px-1 py-px text-[9px] rounded bg-[var(--color-elevated)] text-[var(--color-text-muted)] border border-[var(--color-border)]"
+                      title={s}
+                    >
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {p.node.lob && (
+                <span
+                  class="ml-auto inline-flex items-center px-1.5 py-px text-[9px] rounded uppercase tracking-wider bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+                  data-testid={`org-chart-v2-lob-${p.node.id}`}
+                  title={`LOB: ${p.node.lob}`}
+                >
+                  {p.node.lob}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── footer: counts + cadence — interactive buttons are 44×44
+          to satisfy the Wave 1 touch-target contract; the visible
+          dot+number is tight inside the larger hit-area. ── */}
+      <div class="border-t border-[var(--color-border)] px-1 text-[10px] text-[var(--color-text-faint)] flex items-center justify-between flex-wrap gap-x-1">
+        <div class="flex items-center">
+          {p.hasChildren && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); p.onToggle(); }}
+              class="cursor-pointer min-h-[44px] min-w-[44px] inline-flex items-center justify-center gap-0.5 hover:text-[var(--color-accent)] transition-colors"
+              data-testid={`org-chart-v2-toggle-${p.node.id}`}
+              aria-expanded={p.isOpen}
+              aria-label={p.isOpen ? 'Collapse children' : 'Expand children'}
+            >
+              {p.isOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              <span class="font-medium">{reportCount}</span>
+            </button>
+          )}
+          {humanReportCount > 0 && (
+            <span
+              class="inline-flex items-center justify-center gap-0.5 min-h-[44px] min-w-[28px] px-1"
+              data-testid={`org-chart-v2-reports-${p.node.id}`}
+              aria-label={`${humanReportCount} human report${humanReportCount === 1 ? '' : 's'}`}
+              title={`${humanReportCount} human report${humanReportCount === 1 ? '' : 's'}`}
+            >
+              <User size={9} />
+              <span>{humanReportCount}</span>
+            </span>
+          )}
+          {aiReportCount > 0 && (
+            <span
+              class="inline-flex items-center justify-center gap-0.5 min-h-[44px] min-w-[28px] px-1"
+              data-testid={`org-chart-v2-ai-reports-${p.node.id}`}
+              aria-label={`${aiReportCount} AI employee${aiReportCount === 1 ? '' : 's'}`}
+              title={`${aiReportCount} AI employee${aiReportCount === 1 ? '' : 's'}`}
+            >
+              <Bot size={9} />
+              <span>{aiReportCount}</span>
+            </span>
+          )}
+        </div>
+        <div class="flex items-center">
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); p.onScheduled(); }}
-            class="cursor-pointer min-h-[28px] inline-flex items-center gap-1 hover:text-[var(--color-accent)] transition-colors group"
+            class="cursor-pointer min-h-[44px] min-w-[44px] inline-flex items-center justify-center gap-0.5 hover:text-[var(--color-accent)] transition-colors"
             data-testid={`org-chart-v2-scheduled-${p.node.id}`}
             aria-label={`Open ${scheduled} scheduled task${scheduled === 1 ? '' : 's'}`}
-            title="View scheduled tasks"
+            title={`${scheduled} scheduled task${scheduled === 1 ? '' : 's'}`}
           >
-            <Calendar size={10} />
-            <span>{scheduled} sched</span>
-            <span class="opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true">→</span>
+            <Calendar size={9} />
+            <span>{scheduled}</span>
           </button>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); p.onTriggered(); }}
-            class="cursor-pointer min-h-[28px] inline-flex items-center gap-1 hover:text-[var(--color-accent)] transition-colors group"
+            class="cursor-pointer min-h-[44px] min-w-[44px] inline-flex items-center justify-center gap-0.5 hover:text-[var(--color-accent)] transition-colors"
             data-testid={`org-chart-v2-triggered-${p.node.id}`}
             aria-label={`Open ${triggered} triggered task${triggered === 1 ? '' : 's'}`}
-            title="View triggered tasks"
+            title={`${triggered} triggered task${triggered === 1 ? '' : 's'}`}
           >
-            <Zap size={10} />
-            <span>{triggered} trig</span>
-            <span class="opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true">→</span>
+            <Zap size={9} />
+            <span>{triggered}</span>
           </button>
         </div>
       </div>

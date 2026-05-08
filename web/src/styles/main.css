@@ -217,51 +217,148 @@ input, textarea, select {
   animation: kanban-pulse-frames 1500ms ease-out;
 }
 
-/* Slice 10 Wave 2 — Org Chart V2 tree connector rails.
-   .org-chart-children is the container that holds a parent's children.
-   It draws a vertical line on its left edge that runs the full height
-   of the children block (top → just above the last child's stub).
-   .org-chart-child-rail wraps each individual child branch and draws a
-   horizontal stub that meets the vertical rail at the avatar centerline
-   (~28px from the top — card top padding 12px + half of 40px avatar).
-   The last child trims the vertical rail's tail below its stub so the
-   tree shows a clean L-shape on the final sibling without JS.
-   Both rails use border-strong so the contrast reads on the dark bg. */
-.org-chart-children {
-  position: relative;
+/* Slice 10 Wave 4 — Org Chart V2 horizontal sibling layout.
+   Cards fan out HORIZONTALLY (one row of children below their parent)
+   in classic org-chart style, replacing the Wave 2 vertical rail tree.
+
+   Markup:
+     .org-chart-subtree (flex column, items-center)
+       └── <NodeCard />
+       └── .org-chart-trunk (vertical line down 16px to the bus)
+       └── .org-chart-children-row (flex row of subtrees, scrolls if too wide)
+             ├── .org-chart-child (per-sibling, draws half-bus + vertical)
+             │     └── <NodeBranch /> recursing
+             └── ...
+
+   The horizontal bus is drawn by each child rendering a half-bus slice
+   across its top — adjacent slices butt up to form one continuous line.
+   First child's slice starts at its center (50%) and goes right; last
+   child's slice goes from left to its center (50%). A short vertical
+   below the bus connects to each child's card top.
+
+   Lines use --color-border-strong for contrast on dark bg.
+*/
+
+/* Subtree container — parent card on top, vertical trunk, then row of
+   children. align-items:center keeps the parent card horizontally
+   centered above its children's bus. */
+.org-chart-subtree {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
-.org-chart-children::before {
+
+/* Vertical trunk between a parent card and its children's bus. */
+.org-chart-trunk {
+  width: 1px;
+  height: 12px;
+  background: var(--color-border-strong);
+  flex-shrink: 0;
+}
+
+/* Row of sibling subtrees. Default: single horizontal row with overflow
+   scroll when too wide. align-items: flex-start so each child column
+   starts flush at the top — variable subtree depths just dangle below. */
+.org-chart-children-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+}
+
+/* Per-child wrapper: holds the half-bus + short vertical above the
+   child's own subtree. position:relative so the pseudo-elements can
+   anchor to it. Padding-top reserves room for the connectors. */
+.org-chart-child {
+  position: relative;
+  padding-top: 14px;        /* connector space above the card */
+  padding-left: 4px;
+  padding-right: 4px;
+  flex: 0 0 auto;           /* don't shrink — keep card width */
+}
+
+/* Short vertical drop from the bus down to the top of this child's
+   card. Sits inside the padding-top reserve. */
+.org-chart-child::before {
   content: '';
   position: absolute;
-  left: -16px;
   top: 0;
-  bottom: 0;
+  left: 50%;
   width: 1px;
+  height: 14px;
   background: var(--color-border-strong);
+  transform: translateX(-0.5px);
   pointer-events: none;
 }
-.org-chart-child-rail {
-  position: relative;
-}
-.org-chart-child-rail::before {
+
+/* Horizontal half-bus. Default spans full width (so adjacent siblings
+   butt up to form a continuous bus). First / last / only children
+   trim the bus so it doesn't extend beyond the outermost vertical. */
+.org-chart-child::after {
   content: '';
   position: absolute;
-  left: -16px;
-  top: 32px;
-  width: 16px;
+  top: 0;
+  left: 0;
+  right: 0;
   height: 1px;
   background: var(--color-border-strong);
   pointer-events: none;
 }
-.org-chart-child-rail:last-child::after {
-  content: '';
-  position: absolute;
-  left: -17px;
-  top: 33px;
-  bottom: 0;
-  width: 3px;
-  background: var(--color-bg);
-  pointer-events: none;
+.org-chart-child:first-child::after { left: calc(50% - 0.5px); }
+.org-chart-child:last-child::after  { right: calc(50% - 0.5px); }
+.org-chart-child:only-child::after  { display: none; }
+.org-chart-child:only-child::before { /* still draw vertical drop */ }
+
+/* When a parent has only ONE child, skip the bus entirely — the trunk
+   continues straight down to the child. The trunk + ::before vertical
+   meet seamlessly because they're both 1px and centered. */
+
+/* When the children row overflows horizontally we let the user scroll
+   instead of wrapping (wrapping breaks the bus visualization). */
+.org-chart-canvas-scroll {
+  overflow-x: auto;
+}
+
+/* Mobile (<640px) — fall back to a vertical stack so cards remain
+   readable. The horizontal bus would compress to invisible at that
+   width anyway; vertical drops + indent rails read better on phones. */
+@media (max-width: 639.5px) {
+  .org-chart-children-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .org-chart-child {
+    padding-top: 0;
+    padding-left: 16px;
+    padding-bottom: 8px;
+  }
+  .org-chart-child::before {
+    /* On mobile, use a left-edge rail (Wave 2 style) instead of a top vertical */
+    top: 12px;
+    left: 0;
+    width: 1px;
+    height: calc(100% - 12px);
+    transform: none;
+  }
+  .org-chart-child::after {
+    /* Horizontal stub from the left rail to the card top */
+    top: 12px;
+    left: 0;
+    right: auto;
+    width: 16px;
+    height: 1px;
+  }
+  .org-chart-child:first-child::after,
+  .org-chart-child:last-child::after,
+  .org-chart-child:only-child::after {
+    /* Reset the desktop trim variants — every child gets a stub */
+    left: 0;
+    right: auto;
+    display: block;
+  }
+  .org-chart-trunk { display: none; }
+  .org-chart-card { width: 100% !important; max-width: 100% !important; }
 }
 
 /* Privacy blur — used on Memories + Hive Mind summaries when the user

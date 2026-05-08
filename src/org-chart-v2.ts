@@ -223,10 +223,47 @@ function readAgentNode(
   };
 }
 
+/** Synthesize a node for the `main` agent. Mirrors the pattern used by
+ *  `listAgentSliceMetadata` in src/agent-config.ts: there is no
+ *  agents/main/agent.yaml on disk, but main is always running as the
+ *  primary ClaudeClaw assistant and must appear on the org chart.
+ *  Reports to `joe` so it sits as a peer of meta. Type is "ai" with
+ *  platform="claude". */
+function synthesizeMainNode(runtime: AgentRuntimeStats | undefined): OrgV2Node {
+  return {
+    id: 'main',
+    type: 'ai',
+    name: 'Main',
+    role: 'Primary ClaudeClaw assistant (@ClawdOS1_bot)',
+    reports_to: 'joe',
+    lob: '',
+    projects: [],
+    skills: { primary: [] },
+    owns: {
+      scheduled_tasks: [],
+      triggered_tasks: [],
+      n8n_workflows: [],
+      watchers: [],
+    },
+    four_rs: { role: '', responsibilities: [], results: [], requirements: [] },
+    personality: { tone: '', pushback: '', format: '' },
+    avatar: null,
+    running: runtime ? runtime.running : false,
+    today_turns: runtime ? runtime.today_turns : 0,
+    scheduled_count: 0,
+    triggered_count: 0,
+  };
+}
+
 /** Public surface — every node on the org chart (humans first, then AI
  *  agents). The dashboard route supplies per-agent runtime stats; for
  *  unit-testing or stub callers, runtimeStats may be omitted (defaults
- *  to running:false, today_turns:0). */
+ *  to running:false, today_turns:0).
+ *
+ *  The synthesized `main` agent is always included even though there's
+ *  no agents/main/agent.yaml on disk — see synthesizeMainNode().  This
+ *  mirrors `listAgentSliceMetadata` so org chart and cost rollups agree
+ *  on the canonical agent roster. */
 export function readOrgChartV2(
   runtimeStats?: Map<string, AgentRuntimeStats>,
 ): OrgV2Node[] {
@@ -238,7 +275,12 @@ export function readOrgChartV2(
     out.push(h);
   }
 
+  // Synthesize main first so it leads the AI section even though
+  // there's no agents/main/agent.yaml on disk.
+  out.push(synthesizeMainNode(runtimeStats?.get('main')));
+
   for (const id of listAgentIds()) {
+    if (id === 'main') continue; // already synthesized above
     const node = readAgentNode(id, runtimeStats?.get(id));
     if (node) out.push(node);
   }

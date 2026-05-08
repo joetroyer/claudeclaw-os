@@ -103,7 +103,9 @@ type: "ai"
     const nodes = readOrgChartV2();
 
     // Humans come first, then AI agents — order asserted by index.
-    expect(nodes.length).toBe(5);
+    // Slice 10 Wave 4: synthesized `main` agent is always included so
+    // count is +1 from the on-disk fixture (4 → 5 here).
+    expect(nodes.length).toBe(6);
     expect(nodes[0].id).toBe('joe');
     expect(nodes[0].type).toBe('human');
     expect(nodes[1].id).toBe('ali');
@@ -133,6 +135,61 @@ type: "ai"
     // Humans have running:null / today_turns:null (no process to probe).
     expect(byId.joe.running).toBeNull();
     expect(byId.joe.today_turns).toBeNull();
+  });
+
+  it('always includes a synthesized `main` agent reporting to joe', () => {
+    // Even with NO agent dirs on disk, main must surface so the org
+    // chart shows the primary ClaudeClaw assistant alongside its peers.
+    writeHumans(`humans:
+  - id: joe
+    name: Joe
+    role: Founder
+    type: "human"
+    reports_to: ""
+`);
+
+    const nodes = readOrgChartV2();
+    const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
+
+    expect(byId.main).toBeDefined();
+    expect(byId.main.type).toBe('ai');
+    expect(byId.main.name).toBe('Main');
+    // Reports to joe so it sits as a sibling of meta on the chart.
+    expect(byId.main.reports_to).toBe('joe');
+    // Must carry the standard owns block (empty, but present so the
+    // wire shape matches every other agent node).
+    expect(byId.main.owns).toEqual({
+      scheduled_tasks: [],
+      triggered_tasks: [],
+      n8n_workflows: [],
+      watchers: [],
+    });
+    // Default running flag is false when no runtimeStats are passed.
+    expect(byId.main.running).toBe(false);
+  });
+
+  it('does not duplicate `main` when an agents/main/agent.yaml exists on disk', () => {
+    // Defensive: even if a future migration creates agents/main/agent.yaml,
+    // the synthesized entry should still be the only `main` node.
+    writeHumans(`humans:
+  - id: joe
+    name: Joe
+    type: "human"
+    reports_to: ""
+`);
+    writeAgent('main', `name: MainOnDisk
+description: "Should be skipped — synthesized main wins."
+telegram_bot_token_env: MAIN_BOT_TOKEN
+type: "ai"
+reports_to: "joe"
+`);
+
+    const nodes = readOrgChartV2();
+    const mains = nodes.filter((n) => n.id === 'main');
+    expect(mains).toHaveLength(1);
+    // The synthesized entry is the canonical one — name "Main", not
+    // "MainOnDisk" — proving listAgentIds()'s `main` was skipped.
+    expect(mains[0].name).toBe('Main');
   });
 
   it('builds a parent-of map that lets a caller stitch the tree from reports_to edges', () => {
@@ -166,8 +223,9 @@ reports_to: "meta"
 
     // Joe is the only root.
     expect(childrenOf.get('__root__')).toEqual(['joe']);
-    // Meta is parented to joe.
-    expect(childrenOf.get('joe')).toEqual(['meta']);
+    // Joe gets both meta (from disk) and the synthesized main agent.
+    // Order matches insertion: synthesized main first, then disk-walked.
+    expect(childrenOf.get('joe')?.sort()).toEqual(['main', 'meta']);
     // Comms is parented to meta.
     expect(childrenOf.get('meta')).toEqual(['comms']);
   });

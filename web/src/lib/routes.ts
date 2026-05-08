@@ -4,7 +4,10 @@ import {
   Swords, Workflow,
   Settings,
   Webhook,
+<<<<<<< HEAD
   Gauge,
+=======
+>>>>>>> slice-2-triggered-tasks
 } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
 

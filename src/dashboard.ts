@@ -120,14 +120,46 @@ import {
   clearMeetingSessions,
   getOpenTextMeetingIds,
   getTextMeetings,
+  insertWebhookPayload,
+  listWebhookPayloads,
 } from './db.js';
 import { messageQueue } from './message-queue.js';
 import * as killSwitches from './kill-switches.js';
+import {
+  loadWebhookWatcher,
+  listWebhookWatchers,
+  runActions as runWatcherActions,
+} from './watchers.js';
 import { getIngestionQuotaStatus, extractViaClaude } from './memory-ingest.js';
 import { WARROOM_ENABLED, WARROOM_PORT } from './config.js';
 import { logger } from './logger.js';
 import { getTelegramConnected, getBotInfo, chatEvents, getIsProcessing, abortActiveQuery, ChatEvent } from './state.js';
 import { killProcess, isProcessAlive, findProcessesByPattern } from './platform.js';
+
+// Slice 2 webhook helpers. Used by /api/watchers/webhook/:slug to pick a
+// small allowlist of headers (no auth/cookie data) and to extract the
+// remote IP through trusted-proxy headers.
+function safeWebhookHeaders(c: any): Record<string, string> {
+  const want = [
+    'user-agent', 'content-type',
+    'x-forwarded-for', 'cf-connecting-ip',
+    'x-claudeclaw-signature', 'x-hub-signature-256',
+  ];
+  const out: Record<string, string> = {};
+  for (const h of want) {
+    const v = c.req.header(h);
+    if (typeof v === 'string') out[h] = v;
+  }
+  return out;
+}
+
+function getWebhookRemoteIp(c: any): string {
+  return (
+    c.req.header('cf-connecting-ip') ||
+    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+    'unknown'
+  );
+}
 
 async function classifyTaskAgent(prompt: string): Promise<string | null> {
   const agentIds = listAgentIds();
@@ -268,6 +300,126 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
   app.get('/favicon.ico', (c) => new Response(FAVICON_BYTES, {
     headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' },
   }));
+
+  // ── Slice 2: Triggered Tasks (Webhook Watcher) ─────────────────────────
+  //
+  // Public webhook ingress for `webhook` watcher entries in watchers.yaml.
+  // Mounted BEFORE the token + CSRF middlewares so external callers (n8n,
+  // Supabase, Zapier, etc.) can POST without dashboard tokens. Auth is
+  // HMAC-SHA256 of the raw request body, compared via timingSafeEqual.
+  //
+  //   Header:    X-Claudeclaw-Signature: sha256=<hex>
+  //   Body:      raw bytes (any content-type; JSON is parsed if possible)
+  //   Modes:     test | preview | run
+  //     - run/test:  signature is REQUIRED; mismatch → 401
+  //     - preview:   signature optional; payload captured for shape
+  //                  inspection (signature_valid=0 logged when missing)
+  //
+  // The kill switch (DASHBOARD_MUTATIONS_ENABLED) is honored explicitly
+  // here since we sit before the global mutation middleware.
+  app.post('/api/watchers/webhook/:slug', async (c) => {
+    const slug = c.req.param('slug');
+    if (!slug || !/^[a-z0-9][a-z0-9-]{0,63}$/i.test(slug)) {
+      return c.json({ error: 'invalid slug' }, 400);
+    }
+
+    const watcher = loadWebhookWatcher(slug);
+    if (!watcher) return c.json({ error: 'webhook not found' }, 404);
+
+    const mode = (watcher.mode || 'test') as 'test' | 'preview' | 'run';
+
+    if (!killSwitches.isEnabled('DASHBOARD_MUTATIONS_ENABLED')) {
+      logger.warn({ slug }, 'webhook refused: DASHBOARD_MUTATIONS_ENABLED off');
+      return c.json({ error: 'mutations disabled (incident kill switch)' }, 503);
+    }
+
+    // Read raw body BEFORE any parsing so the HMAC matches what was signed.
+    const rawBuf = Buffer.from(await c.req.arrayBuffer());
+    const rawBody = rawBuf.toString('utf-8');
+
+    // HMAC verification: sha256 over the raw body, hex-encoded. Header
+    // accepts either `sha256=<hex>` (GitHub-style) or a bare hex string.
+    const sigHeader = c.req.header('x-claudeclaw-signature') || c.req.header('x-hub-signature-256') || '';
+    const provided = sigHeader.startsWith('sha256=') ? sigHeader.slice(7) : sigHeader;
+    const secret = process.env[watcher.secret_env] || '';
+    let signatureValid = false;
+    if (secret && provided && /^[0-9a-fA-F]+$/.test(provided)) {
+      try {
+        const expected = crypto.createHmac('sha256', secret).update(rawBuf).digest('hex');
+        const a = Buffer.from(expected, 'hex');
+        const b = Buffer.from(provided, 'hex');
+        signatureValid = a.length === b.length && crypto.timingSafeEqual(a, b);
+      } catch {
+        signatureValid = false;
+      }
+    }
+
+    // HMAC required uniformly across all 3 modes (test/preview/run).
+    // The webhook ingress is a public surface — letting preview accept
+    // unsigned requests would let an attacker fill the payload log and
+    // probe what slugs are wired without ever providing a secret. The
+    // integration plan is unambiguous: HMAC required, public surface.
+    if (!signatureValid) {
+      const reason = !secret
+        ? 'secret not configured'
+        : !provided
+          ? 'missing signature'
+          : 'signature mismatch';
+      logger.warn({ slug, mode, reason }, 'webhook: rejected');
+      try {
+        insertWebhookPayload({
+          watcher_slug: slug,
+          payload_json: rawBody,
+          headers_json: JSON.stringify(safeWebhookHeaders(c)),
+          signature_valid: 0,
+          mode,
+          remote_ip: getWebhookRemoteIp(c),
+        });
+      } catch { /* logging-only */ }
+      return c.json({ error: 'unauthorized', reason }, 401);
+    }
+
+    // Parse JSON if possible; otherwise pass raw text under `raw`.
+    let payload: unknown;
+    try {
+      payload = rawBody ? JSON.parse(rawBody) : {};
+    } catch {
+      payload = { raw: rawBody };
+    }
+
+    const payloadId = insertWebhookPayload({
+      watcher_slug: slug,
+      payload_json: rawBody || JSON.stringify(payload),
+      headers_json: JSON.stringify(safeWebhookHeaders(c)),
+      signature_valid: signatureValid ? 1 : 0,
+      mode,
+      remote_ip: getWebhookRemoteIp(c),
+    });
+
+    if (mode === 'preview') {
+      return c.json({
+        ok: true,
+        mode,
+        payload_id: payloadId,
+        message: 'payload captured (preview mode); no actions fired',
+      });
+    }
+
+    const queuedIds = await runWatcherActions(watcher.actions, {
+      watcher: watcher.name,
+      slug,
+      mode,
+      payload,
+      payload_raw: rawBody,
+    });
+
+    return c.json({
+      ok: true,
+      mode,
+      payload_id: payloadId,
+      queued_mission_tasks: queuedIds,
+    });
+  });
 
   // Token auth middleware.
   //
@@ -1530,6 +1682,88 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     const id = c.req.param('id');
     resumeScheduledTask(id);
     return c.json({ ok: true });
+  });
+
+  // ── Slice 2: Triggered Tasks (Webhook) read endpoints ────────────────
+  //
+  // UI-facing reads (auth-gated by the token middleware above). The
+  // public POST that ingests payloads is registered earlier — before
+  // the token middleware — since external services don't carry a
+  // dashboard token. These reads are inside the gate.
+
+  app.get('/api/watchers/webhook', (c) => {
+    const watchers = listWebhookWatchers();
+    const url = new URL(c.req.url);
+    const base = (DASHBOARD_URL || `${url.protocol}//${url.host}`).replace(/\/$/, '');
+    return c.json({
+      watchers: watchers.map((w) => ({
+        name: w.name,
+        slug: w.slug,
+        mode: w.mode || 'test',
+        secret_env: w.secret_env,
+        secret_set: !!process.env[w.secret_env],
+        actions: w.actions,
+        webhook_url: `${base}/api/watchers/webhook/${w.slug}`,
+      })),
+    });
+  });
+
+  app.get('/api/watchers/webhook/:slug', (c) => {
+    const slug = c.req.param('slug');
+    const w = loadWebhookWatcher(slug);
+    if (!w) return c.json({ error: 'not found' }, 404);
+    const url = new URL(c.req.url);
+    const base = (DASHBOARD_URL || `${url.protocol}//${url.host}`).replace(/\/$/, '');
+    return c.json({
+      watcher: {
+        name: w.name,
+        slug: w.slug,
+        mode: w.mode || 'test',
+        secret_env: w.secret_env,
+        secret_set: !!process.env[w.secret_env],
+        actions: w.actions,
+        webhook_url: `${base}/api/watchers/webhook/${w.slug}`,
+      },
+    });
+  });
+
+  app.get('/api/watchers/webhook/:slug/payloads', (c) => {
+    const slug = c.req.param('slug');
+    const limit = Math.min(parseInt(c.req.query('limit') || '20', 10) || 20, 100);
+    const rows = listWebhookPayloads(slug, limit);
+    return c.json({ payloads: rows });
+  });
+
+  // Fire-test-payload from the UI. Runs the watcher's actions with a
+  // user-supplied JSON body and writes mode='test' into webhook_payloads.
+  // Auth-gated; bypasses HMAC because the caller IS the dashboard.
+  app.post('/api/watchers/webhook/:slug/test', async (c) => {
+    const slug = c.req.param('slug');
+    const w = loadWebhookWatcher(slug);
+    if (!w) return c.json({ error: 'not found' }, 404);
+
+    let body: unknown = {};
+    try { body = await c.req.json(); } catch { body = {}; }
+    const rawBody = JSON.stringify(body);
+
+    const payloadId = insertWebhookPayload({
+      watcher_slug: slug,
+      payload_json: rawBody,
+      headers_json: JSON.stringify({ source: 'dashboard-fire-test' }),
+      signature_valid: 1,
+      mode: 'test',
+      remote_ip: 'dashboard',
+    });
+
+    const queuedIds = await runWatcherActions(w.actions, {
+      watcher: w.name,
+      slug,
+      mode: 'test',
+      payload: body,
+      payload_raw: rawBody,
+    });
+
+    return c.json({ ok: true, mode: 'test', payload_id: payloadId, queued_mission_tasks: queuedIds });
   });
 
   // ── Mission Control endpoints ────────────────────────────────────────

@@ -776,6 +776,28 @@ function runMigrations(database: Database.Database): void {
       ON conversation_log(source, source_meeting_id, source_turn_id, agent_id)
       WHERE source != 'telegram' AND role = 'assistant';
   `);
+
+  // ── Slice 2: Triggered Tasks (Webhook Watcher) ───────────────────────
+  // Inbound webhook payloads land here. Stored for:
+  //   - `preview` mode: lets the user inspect payload shape before going live.
+  //   - `test` mode:   audit trail for fire-test-payload runs.
+  //   - `run` mode:    optional log so a misfiring webhook can be debugged
+  //                    from the UI without grepping logs.
+  // Strictly additive — no existing table touched.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS webhook_payloads (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      watcher_slug     TEXT    NOT NULL,
+      payload_json     TEXT    NOT NULL,
+      headers_json     TEXT    NOT NULL DEFAULT '{}',
+      signature_valid  INTEGER NOT NULL DEFAULT 0,
+      mode             TEXT    NOT NULL,
+      received_at      INTEGER NOT NULL,
+      remote_ip        TEXT    NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_webhook_payloads_slug
+      ON webhook_payloads(watcher_slug, received_at DESC);
+  `);
 }
 
 /** @internal - for tests only. Creates a fresh in-memory database. */
@@ -796,6 +818,52 @@ export function _initTestDatabase(): void {
 export function _testBackdateMeetingEnd(meetingId: string, endedAtSec: number): void {
   db.prepare('UPDATE warroom_meetings SET ended_at = ? WHERE id = ?')
     .run(endedAtSec, meetingId);
+}
+
+// ── Slice 2: Webhook payloads ──────────────────────────────────────────
+
+export interface WebhookPayloadRow {
+  id: number;
+  watcher_slug: string;
+  payload_json: string;
+  headers_json: string;
+  signature_valid: number;
+  mode: string;
+  received_at: number;
+  remote_ip: string;
+}
+
+export function insertWebhookPayload(row: {
+  watcher_slug: string;
+  payload_json: string;
+  headers_json: string;
+  signature_valid: number;
+  mode: string;
+  remote_ip: string;
+}): number {
+  const result = db.prepare(
+    `INSERT INTO webhook_payloads (watcher_slug, payload_json, headers_json, signature_valid, mode, received_at, remote_ip)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    row.watcher_slug,
+    row.payload_json,
+    row.headers_json,
+    row.signature_valid,
+    row.mode,
+    Math.floor(Date.now() / 1000),
+    row.remote_ip,
+  );
+  return result.lastInsertRowid as number;
+}
+
+export function listWebhookPayloads(slug: string, limit = 20): WebhookPayloadRow[] {
+  return db.prepare(
+    `SELECT id, watcher_slug, payload_json, headers_json, signature_valid, mode, received_at, remote_ip
+     FROM webhook_payloads
+     WHERE watcher_slug = ?
+     ORDER BY id DESC
+     LIMIT ?`,
+  ).all(slug, limit) as WebhookPayloadRow[];
 }
 
 export function getSession(chatId: string, agentId = 'main'): string | undefined {

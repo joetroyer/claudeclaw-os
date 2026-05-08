@@ -236,3 +236,95 @@ watchers:
                 Workflow: {payload.workflow_name} (id: {_workflow_id})
                 Error: {payload.error_message}
                 Triage at https://clawos.joetroyer.com/mission
+
+  # GLTH Sales & Marketing meeting recap pipeline.
+  # Trigger source: n8n workflow watching `#integration-alerts` Slack
+  # channel for Zoom Cloud Recording Completed messages. n8n parses the
+  # message, filters to GLTH-only meetings, and POSTs the parsed payload
+  # here with HMAC-SHA256 over the raw body (X-Claudeclaw-Signature).
+  # Owner: ops (task management + admin + meeting follow-up belongs to ops).
+  # Mode is `run` so accepted POSTs immediately queue an ops mission.
+  - name: glth-zoom-recording
+    type: webhook
+    slug: glth-zoom-recording
+    secret_env: GLTH_ZOOM_SECRET
+    mode: run
+    actions:
+      - queue-mission:
+          agent: ops
+          title: "GLTH meeting recap → ClickUp ({payload.duration_minutes}m)"
+          prompt: |
+            A new Zoom recording landed for the GLTH Sales & Marketing meeting.
+            Walk this end-to-end and stop only when ClickUp tasks exist.
+
+            Meeting:        {payload.meeting_name}
+            Duration:       {payload.duration_minutes} minutes
+            Recording URL:  {payload.recording_url}
+
+            ── Step 1: pull the transcript ───────────────────────────
+            Try in order, stop at first that works:
+
+            1. If a `zoom` skill exists at `~/.claude/skills/zoom/` (or
+               project `skills/zoom/`), use it. Skills always win.
+            2. If `ZOOM_ACCOUNT_ID` / `ZOOM_CLIENT_ID` / `ZOOM_CLIENT_SECRET`
+               are set in `.env`, use the Zoom OAuth API:
+                 https://api.zoom.us/v2/meetings/{meetingId}/recordings
+               Find a `recording_type=audio_transcript` file and GET it
+               with `Authorization: Bearer <access_token>`.
+            3. Fallback — pull the share-link page directly. The recording URL
+               is a public share link with a transcript download button. Try:
+                 yt-dlp --skip-download --write-auto-sub "{payload.recording_url}"
+               or scrape the page and look for a `transcript_token` /
+               `.vtt` URL. If yt-dlp can't see the page, log the limitation
+               and stop here — escalate to Joe in your reply.
+
+            Save the transcript text to a temp file under /tmp/ and note the path.
+
+            ── Step 2: find the meeting's Google Doc ─────────────────
+            Joe keeps recurring meeting notes in Google Drive under his
+            personal account. Search via the `gws` CLI:
+
+              gws drive search "GLTH Sales" --owner=me --modified-after="$(date -v-3d -u +%Y-%m-%dT00:00:00Z 2>/dev/null || date -d '3 days ago' -u +%Y-%m-%dT00:00:00Z)"
+
+            Pick the doc whose title matches the meeting name AND whose
+            modified date is closest to now (recurring meetings get
+            edited live during the call). If multiple candidates surface,
+            log them all and prefer the most recently modified.
+
+            Read it:
+              gws drive read <fileId> --format=text
+
+            ── Step 3: synthesize action items ───────────────────────
+            Combine transcript + Google Doc notes. Pull only ACTION ITEMS
+            (decisions, todos, follow-ups). Skip recap/discussion lines.
+            For each item, extract:
+              - title (≤ 60 chars, imperative voice)
+              - assignee (full name from transcript / doc; null if unclear)
+              - due date (only if explicitly stated)
+              - description (1–3 sentence context)
+
+            ── Step 4: push to ClickUp ───────────────────────────────
+            Use the `clickup` skill at `~/.claude/skills/clickup/`.
+            Target list: GLTH Sales & Marketing → list_id `901800809572`.
+
+            For each action item:
+              clickup create --list 901800809572 \
+                --title "<title>" \
+                --assignee "<assignee>" \
+                --due "<due>" \
+                --description "<description>\n\nSource: Zoom recording {payload.recording_url}"
+
+            If the skill takes a different shape, follow its SKILL.md.
+            Tag every task with `glth-zoom-recap` so Joe can audit them
+            in one filter view.
+
+            ── Step 5: log + reply ───────────────────────────────────
+            Log to hive_mind:
+              action  = glth-zoom-recap
+              summary = "Created N tasks from <meeting_name> (<duration>m). Recording: <url>. Tasks: <id1>, <id2>, ..."
+              chat_id = 'system'
+
+            Telegram reply: tight bullets — meeting name, duration, count
+            of action items created, ClickUp list URL. If any step
+            blocked (no transcript / no doc / ClickUp creds missing),
+            lead with what's blocked so Joe can unblock.

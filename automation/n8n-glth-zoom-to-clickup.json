@@ -1,0 +1,188 @@
+{
+  "name": "GLTH Zoom Recording → ClawOS",
+  "nodes": [
+    {
+      "parameters": {
+        "trigger": ["message_posted"],
+        "channelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "REPLACE_WITH_INTEGRATION_ALERTS_CHANNEL_ID"
+        },
+        "options": {
+          "filterValue": "Zoom Recording Completed"
+        }
+      },
+      "id": "slack-trigger-1",
+      "name": "Slack: #integration-alerts",
+      "type": "n8n-nodes-base.slackTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_WITH_SLACK_CRED_ID",
+          "name": "Slack OAuth (joetroyer.com)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-zoom-marker",
+              "leftValue": "={{ $json.text || $json.message?.text || '' }}",
+              "rightValue": "Zoom Recording Completed",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "cond-glth-marker",
+              "leftValue": "={{ $json.text || $json.message?.text || '' }}",
+              "rightValue": "Meeting: GLTH Sales & Marketing Meeting",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-glth",
+      "name": "Filter: GLTH Sales & Marketing only",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the Slack message text into a structured payload.\n// Expected (verbatim) format from Zoom-Slack integration:\n//\n//   Zoom Recording Completed:\n//   Meeting: GLTH Sales & Marketing Meeting\n//   Duration: 63 minutes\n//   Recording Link: https://us06web.zoom.us/rec/share/...\n//\n// We tolerate extra whitespace + trailing characters and capture the URL\n// up to the next newline / whitespace boundary.\n\nconst raw = $input.first().json.text || $input.first().json.message?.text || '';\n\nconst meeting = (raw.match(/Meeting:\\s*([^\\n\\r]+)/) || [])[1]?.trim();\nconst durationStr = (raw.match(/Duration:\\s*(\\d+)\\s*minutes?/i) || [])[1];\nconst recordingUrl = (raw.match(/Recording\\s*Link:\\s*(https?:\\/\\/\\S+)/i) || [])[1]?.trim();\n\nif (!meeting || !recordingUrl) {\n  throw new Error(`Could not parse Slack message. Got meeting='${meeting}' url='${recordingUrl}'. Raw: ${raw.slice(0, 200)}`);\n}\n\nreturn [{\n  json: {\n    meeting_name: meeting,\n    duration_minutes: durationStr ? Number(durationStr) : null,\n    recording_url: recordingUrl,\n    source: 'slack:integration-alerts',\n    slack_message_ts: $input.first().json.ts || $input.first().json.message?.ts || null,\n  },\n}];"
+      },
+      "id": "parse-message",
+      "name": "Parse Slack message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compute HMAC-SHA256 of the raw JSON body. The clawos webhook handler\n// verifies sha256 over the EXACT bytes that arrive on the wire, so we\n// build the body string here, sign it, then pass both forward to the\n// HTTP Request node which sends `body` verbatim and `signature` as a\n// header. n8n's HTTP node sends body parameters as JSON when content-type\n// is application/json, but the resulting bytes are not always identical\n// to JSON.stringify of the source object (key ordering, whitespace),\n// which is why we sign+send the same explicit string.\n\nconst crypto = require('crypto');\n\nconst secret = $env.GLTH_ZOOM_SECRET;\nif (!secret) {\n  throw new Error('GLTH_ZOOM_SECRET env var not set in n8n. Add it under Settings → Variables.');\n}\n\nconst payload = $input.first().json;\nconst body = JSON.stringify({\n  meeting_name: payload.meeting_name,\n  duration_minutes: payload.duration_minutes,\n  recording_url: payload.recording_url,\n  source: payload.source,\n  slack_message_ts: payload.slack_message_ts,\n});\n\nconst signature = crypto.createHmac('sha256', secret).update(body).digest('hex');\n\nreturn [{\n  json: {\n    body,\n    signature: `sha256=${signature}`,\n  },\n}];"
+      },
+      "id": "sign-hmac",
+      "name": "Sign HMAC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://clawos.joetroyer.com/api/hooks/glth-zoom-recording",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Claudeclaw-Signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json.body }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": false
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "post-clawos",
+      "name": "POST clawos /api/hooks/glth-zoom-recording",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 300]
+    }
+  ],
+  "connections": {
+    "Slack: #integration-alerts": {
+      "main": [
+        [
+          {
+            "node": "Filter: GLTH Sales & Marketing only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter: GLTH Sales & Marketing only": {
+      "main": [
+        [
+          {
+            "node": "Parse Slack message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Slack message": {
+      "main": [
+        [
+          {
+            "node": "Sign HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign HMAC": {
+      "main": [
+        [
+          {
+            "node": "POST clawos /api/hooks/glth-zoom-recording",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "errorWorkflow": ""
+  },
+  "tags": [
+    {
+      "name": "clawos"
+    },
+    {
+      "name": "glth"
+    }
+  ],
+  "meta": {
+    "description": "Watches #integration-alerts for Zoom Cloud Recording Completed messages tagged with the GLTH Sales & Marketing Meeting, parses meeting name + duration + recording URL, signs the JSON body with HMAC-SHA256 using GLTH_ZOOM_SECRET, and POSTs to clawos. The clawos webhook watcher (slug: glth-zoom-recording) queues an ops mission_task that pulls the transcript, finds the meeting Google Doc, and pushes action items to ClickUp."
+  }
+}

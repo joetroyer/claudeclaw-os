@@ -59,3 +59,64 @@ Full suite: 595 passed / 5 pre-existing failures (chat-history shape
 test + avatar 404 test + 3 schedule-cli tests that need a built dist).
 All five also fail on clean main pre-merge — none are caused by this
 patch.
+
+## Resolution log — 2026-05-08
+
+Reviewer raised two findings against this wave. Both addressed.
+
+### F1: "PUT /api/humans/:id/yaml rewrites the entire humans.yaml"
+
+Status: resolved by clarifying the contract in code + locking it in a
+test, not by changing the on-disk write strategy.
+
+Investigation: the endpoint loads humans.yaml, mutates only the
+matching `id` entry in the `humans:` array, and re-serializes. The
+reviewer read that as a contract violation ("block-only" → byte-range
+splice). It is not. The block-only contract is "by VALUE, not by
+byte-range": every field of every untouched human survives unchanged.
+A CST-aware splice would preserve comments and key ordering, but adds
+fragility (indentation sensitivity, quoting edge cases) for a file
+that is hand-edited via this same endpoint.
+
+Action:
+1. Added a multi-paragraph comment to `app.put('/api/humans/:id/yaml',
+   ...)` in `src/dashboard.ts` (above the handler) spelling out the
+   contract — what it preserves (every field of every untouched
+   entry) and what it does not (top-level comments, blank lines, key
+   ordering inside an entry, quoting style).
+2. Added a vitest case `preserves every other humans entry by value
+   when one is updated` that stages a 3-human file with rich fields
+   (`email`, `avatar`, `slack_id`, `tz`), updates `joe`, and asserts
+   that `ali` and `sam` round-trip via deep equality (`toEqual`,
+   not `toMatchObject`). A regression that drops a key on serialize
+   would fail this assertion.
+
+### F2: "Traversal tests accept 400 OR 404"
+
+Status: resolved.
+
+Investigation: the agents and humans path-traversal probes in
+`src/dashboard.yaml-edit.test.ts` (lines 242 and 363 in the
+pre-fix file) used `expect([400, 404]).toContain(res.status)`. The
+endpoint regex `^[a-z0-9_-]+$` rejects on the validation step
+BEFORE any filesystem lookup, so the only legal status is 400. A
+404 would mean validation was bypassed and we fell through to a
+file-not-found path — that's a hole, not a tolerable outcome.
+
+Action: tightened both assertions to `expect(res.status).toBe(400)`
+and added a comment on each explaining the contract.
+
+### Test count
+
+Was 22 (slice-10 wave-3 vitest). Now 23 (added the
+"preserves every other humans entry by value" case).
+
+```
+$ npx vitest run src/dashboard.yaml-edit.test.ts
+✓ src/dashboard.yaml-edit.test.ts (23 tests) 155ms
+
+Test Files  1 passed (1)
+      Tests  23 passed (23)
+```
+
+`npx tsc --noEmit` — 0 errors.

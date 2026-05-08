@@ -362,4 +362,75 @@ reports_to: ""
     );
     expect([400, 404]).toContain(res.status);
   });
+
+  // The reviewer flagged "the PUT rewrites the entire humans.yaml file"
+  // as a violation of the block-only contract. The endpoint comment in
+  // src/dashboard.ts spells out that the contract is "block-only by
+  // VALUE, not by byte-range" — every field of every untouched human
+  // must survive the round-trip exactly. This test pins that down.
+  it('preserves every other humans entry by value when one is updated', async () => {
+    const richYaml = `humans:
+  - id: joe
+    name: Joe
+    role: Founder / operator
+    type: "human"
+    reports_to: ""
+    email: joe@example.com
+    avatar: /static/joe.png
+    slack_id: U01JOE
+    tz: America/New_York
+  - id: ali
+    name: Ali
+    role: Operator
+    type: "human"
+    reports_to: "joe"
+    email: ali@example.com
+    avatar: /static/ali.png
+    slack_id: U02ALI
+    tz: Europe/London
+  - id: sam
+    name: Sam
+    role: Advisor
+    type: "human"
+    reports_to: "joe"
+    email: sam@example.com
+    avatar: /static/sam.png
+    slack_id: U03SAM
+    tz: Asia/Tokyo
+`;
+    writeHumans(richYaml);
+    const before = yaml.load(readHumansFile()) as { humans: Array<Record<string, unknown>> };
+    const aliBefore = before.humans.find((h) => h.id === 'ali');
+    const samBefore = before.humans.find((h) => h.id === 'sam');
+
+    const next = `id: joe
+name: Joe Renamed
+role: Founder
+type: "human"
+reports_to: ""
+email: joe-new@example.com
+`;
+    const res = await put('joe', { yaml: next });
+    expect(res.status).toBe(200);
+
+    const after = yaml.load(readHumansFile()) as { humans: Array<Record<string, unknown>> };
+    const aliAfter = after.humans.find((h) => h.id === 'ali');
+    const samAfter = after.humans.find((h) => h.id === 'sam');
+
+    // Block-only by VALUE: every field on every untouched entry must
+    // round-trip exactly. Deep-equal — not subset-match — so an
+    // accidentally dropped key (e.g. `tz` lost during serialization)
+    // would fail this assertion.
+    expect(aliAfter).toEqual(aliBefore);
+    expect(samAfter).toEqual(samBefore);
+
+    // And the targeted entry took the new values.
+    const joeAfter = after.humans.find((h) => h.id === 'joe');
+    expect(joeAfter).toMatchObject({
+      id: 'joe',
+      name: 'Joe Renamed',
+      role: 'Founder',
+      email: 'joe-new@example.com',
+    });
+  });
 });

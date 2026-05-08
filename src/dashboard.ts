@@ -3542,6 +3542,23 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     return c.json({ yaml: humanYaml });
   });
 
+  // Block-only replacement contract for humans.yaml.
+  //
+  // The contract is "block-only by VALUE, not by byte-range": when one
+  // human is updated, every OTHER human's fields are preserved exactly as
+  // they were on disk. We achieve that by parsing the full file with
+  // js-yaml, mutating only the matching `id` entry in the `humans:`
+  // array, and re-serializing. Other humans round-trip through js-yaml's
+  // dumper unchanged in value.
+  //
+  // What the round-trip does NOT preserve: top-level YAML comments, blank
+  // lines, key ordering inside an entry, and quoting style. js-yaml is a
+  // value-preserving serializer, not a CST-preserving one. Preserving the
+  // exact byte ranges of untouched entries would require a CST-aware
+  // YAML library or textual splice; both add fragility (indentation
+  // sensitivity, quoting edge cases) for a file that is already
+  // hand-edited via this same endpoint. The "preserves other humans"
+  // vitest case below locks the value-preservation contract in.
   app.put('/api/humans/:id/yaml', async (c) => {
     const humanId = c.req.param('id');
     if (!YAML_ID_RE.test(humanId)) return c.json({ error: 'invalid id' }, 400);

@@ -6,6 +6,7 @@ import { Pill, StatusDot } from '@/components/Pill';
 import { PageState } from '@/components/PageState';
 import { Modal, Drawer } from '@/components/Modal';
 import { AgentAvatar } from '@/components/AgentAvatar';
+import { ChatWithAgentButton } from '@/components/ChatWithAgentButton';
 import { useFetch } from '@/lib/useFetch';
 import { apiPost, apiPatch, apiDelete, apiGet } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
@@ -348,6 +349,7 @@ function AgentColumn({
           </div>
         </div>
         <span class="text-[11.5px] text-[var(--color-text-muted)] tabular-nums">{tasks.length}</span>
+        <ChatWithAgentButton agentId={agent.id} agentName={agent.name} size={14} />
         <div class="flex items-center">
           <button
             type="button"

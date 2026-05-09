@@ -87,23 +87,16 @@ watchers:
             New WhatsApp from {contact_name}: "{body}"
 
             Draft a reply matching Joe's voice. If you're unsure of context or the right answer, ask Joe before sending. If it's a quick acknowledgment that obviously doesn't need approval, send via the whatsapp_send tool.
-  # Live broker pipeline (public.signals → ceddi-only).
-  # Bridge: supabase/functions/clawos-ceddi-bridge/.
-  # Stance: HIGH-attention. Agent may escalate to Telegram ping.
-  # Payload is MINIMAL — agent fetches fresh row data via PostgREST.
-  # PAUSED until trading-monitor agent is bootstrapped (needs
-  # TRADING_MONITOR_BOT_TOKEN in .env + launchctl bootstrap). Switch
-  # mode back to `test` (or `run`) once the agent is alive.
   - name: trading-monitor-trigger
     type: webhook
     slug: trading-monitor
     secret_env: TRADING_MONITOR_SECRET
-    mode: preview
+    mode: run
     actions:
       - queue-mission:
           agent: trading-monitor
-          title: "Live ceddi signal: {payload.signal_id} ({payload.status_at_trigger})"
-          prompt: |
+          title: 'Live ceddi signal: {payload.signal_id} ({payload.status_at_trigger})'
+          prompt: |-
             LIVE signal event on {payload.schema}.{payload.table}.
             db_event: {payload.db_event}   signal_id: {payload.signal_id}
 
@@ -143,24 +136,16 @@ watchers:
             Tight bullets per your CLAUDE.md.
 
             Hard rules: never trade, never send orders, never DM source channel.
-
-  # Observation-only L1 ingest (analysis.signals_l1).
-  # Currently 4 providers: ceddi (shadow), gold_scalping, goldsignals_swing,
-  # goldsignals_intraday. Bridge: supabase/functions/clawos-ingest-bridge/.
-  # Stance: SILENT. Log only. Never escalate to Telegram from this path.
-  # Payload is MINIMAL — agent fetches fresh row via analysis-schema PostgREST.
-  # PAUSED with the live-broker watcher above — same reason. Set back
-  # to `test`/`run` once trading-monitor agent is bootstrapped.
   - name: trading-monitor-ingest
     type: webhook
     slug: trading-monitor-ingest
     secret_env: TRADING_MONITOR_INGEST_SECRET
-    mode: preview
+    mode: run
     actions:
       - queue-mission:
           agent: trading-monitor
-          title: "Ingest: {payload.provider} ({payload.signal_id})"
-          prompt: |
+          title: 'Ingest: {payload.provider} ({payload.signal_id})'
+          prompt: |-
             OBSERVATION-ONLY signal on {payload.schema}.{payload.table}.
             provider: {payload.provider}   signal_id: {payload.signal_id}
 
@@ -190,12 +175,11 @@ watchers:
 
             Hard rules: NEVER Telegram-ping Joe. NEVER trade. NEVER send orders.
             NEVER DM source channel. Pure observation, log structured, move on.
-
   - name: n8n-error-router
     type: webhook
     slug: n8n-error
     secret_env: N8N_ERROR_SECRET
-    mode: test
+    mode: run
     actions:
       - lookup-owner:
           workflow_field: workflow_id
@@ -241,14 +225,6 @@ watchers:
                 Workflow: {payload.workflow_name} (id: {_workflow_id})
                 Error: {payload.error_message}
                 Triage at https://clawos.joetroyer.com/mission
-
-  # GLTH Sales & Marketing meeting recap pipeline.
-  # Trigger source: n8n workflow watching `#integration-alerts` Slack
-  # channel for Zoom Cloud Recording Completed messages. n8n parses the
-  # message, filters to GLTH-only meetings, and POSTs the parsed payload
-  # here with HMAC-SHA256 over the raw body (X-Claudeclaw-Signature).
-  # Owner: ops (task management + admin + meeting follow-up belongs to ops).
-  # Mode is `run` so accepted POSTs immediately queue an ops mission.
   - name: glth-zoom-recording
     type: webhook
     slug: glth-zoom-recording
@@ -257,33 +233,38 @@ watchers:
     actions:
       - queue-mission:
           agent: ops
-          title: "GLTH meeting recap → ClickUp ({payload.duration_minutes}m)"
+          title: GLTH meeting recap → ClickUp ({payload.duration_minutes}m)
           prompt: |
             A new Zoom recording landed for the GLTH Sales & Marketing meeting.
             Walk this end-to-end and stop only when ClickUp tasks exist.
 
-            Meeting:        {payload.meeting_name}
-            Duration:       {payload.duration_minutes} minutes
-            Recording URL:  {payload.recording_url}
+            Meeting:         {payload.meeting_name}
+            Duration:        {payload.duration_minutes} minutes
+            Recording URL:   {payload.recording_url}
+            Transcript URL:  {payload.transcript_url}
+            Transcript tok:  {payload.transcript_token}
 
             ── Step 1: pull the transcript ───────────────────────────
-            Try in order, stop at first that works:
+            n8n hands you the .vtt download URL directly (Zoom emits it
+            on the `recording.transcript_completed` event, ~10–30 min
+            after the meeting ends). The url + the download_token are in
+            the payload above.
 
-            1. If a `zoom` skill exists at `~/.claude/skills/zoom/` (or
-               project `skills/zoom/`), use it. Skills always win.
-            2. If `ZOOM_ACCOUNT_ID` / `ZOOM_CLIENT_ID` / `ZOOM_CLIENT_SECRET`
-               are set in `.env`, use the Zoom OAuth API:
-                 https://api.zoom.us/v2/meetings/{meetingId}/recordings
-               Find a `recording_type=audio_transcript` file and GET it
-               with `Authorization: Bearer <access_token>`.
-            3. Fallback — pull the share-link page directly. The recording URL
-               is a public share link with a transcript download button. Try:
-                 yt-dlp --skip-download --write-auto-sub "{payload.recording_url}"
-               or scrape the page and look for a `transcript_token` /
-               `.vtt` URL. If yt-dlp can't see the page, log the limitation
-               and stop here — escalate to Joe in your reply.
+            Fetch:
+              curl -sL -o /tmp/glth-{payload.meeting_id}.vtt \
+                "{payload.transcript_url}?access_token={payload.transcript_token}"
 
-            Save the transcript text to a temp file under /tmp/ and note the path.
+            (If transcript_token is null, append `?access_token=$(gws auth token)`
+            as a fallback OR retry without query param if Zoom share is open.)
+
+            Strip the WebVTT cues to plain text:
+              awk '/-->/{p=1;next} p && /^$/{p=0} p' /tmp/glth-{payload.meeting_id}.vtt \
+                > /tmp/glth-{payload.meeting_id}.txt
+
+            If transcript_url is null/empty, fall back to:
+            1. `yt-dlp --skip-download --write-auto-sub "{payload.recording_url}"`
+            2. Local Whisper on the audio_url if all else fails.
+            Note the path you used.
 
             ── Step 2: find the meeting's Google Doc ─────────────────
             Joe keeps recurring meeting notes in Google Drive under his

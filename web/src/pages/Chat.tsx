@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { Send, Square, Sparkles, ArrowDown } from 'lucide-preact';
+import { Send, Square, Sparkles, ArrowDown, Mic } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { PageState } from '@/components/PageState';
 import { StatusDot } from '@/components/Pill';
 import { useFetch } from '@/lib/useFetch';
-import { apiGet, apiPost, chatId } from '@/lib/api';
+import { apiGet, apiPost, apiUpload, chatId } from '@/lib/api';
 import { renderMarkdown } from '@/lib/markdown';
 import { formatCost, formatNumber } from '@/lib/format';
 import { showCosts } from '@/lib/theme';
 import { subscribeChatStream, chatStreamConnected, resetUnread } from '@/lib/chat-stream';
+import { pushToast } from '@/lib/toasts';
 
 interface Turn { role: 'user' | 'assistant'; content: string; source?: string; created_at?: number; photoUrl?: string; photoCaption?: string; }
 interface Agent { id: string; name: string; running: boolean; }
@@ -36,6 +37,25 @@ export function Chat() {
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamConnected = chatStreamConnected.value;
+
+  // Voice note → STT state. Click-toggle: idle → recording → transcribing
+  // → idle. We hold the active recorder + media stream in refs so the
+  // stop handler can finalize the blob and clean up tracks even after
+  // the component re-renders during recording.
+  const [recState, setRecState] = useState<'idle' | 'recording' | 'transcribing'>('idle');
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recStreamRef = useRef<MediaStream | null>(null);
+  const recChunksRef = useRef<Blob[]>([]);
+  // MediaRecorder support sniffed once. If undefined (legacy browser),
+  // we hide the button entirely. `null` = not yet checked.
+  const [micSupported] = useState<boolean>(() =>
+    typeof window !== 'undefined' &&
+    typeof navigator !== 'undefined' &&
+    !!navigator.mediaDevices &&
+    typeof MediaRecorder !== 'undefined',
+  );
+  // Track permission-denied so we don't keep prompting on repeated clicks.
+  const [micDenied, setMicDenied] = useState(false);
   // Track whether the message list is scrolled near the bottom. Drives
   // the floating "scroll to latest" button and tells the auto-scroll
   // effect whether it's safe to jump on a new turn (we don't yank the
@@ -151,6 +171,164 @@ export function Chat() {
     inputRef.current?.focus();
   }
 
+  // Pick a mimeType MediaRecorder will actually accept. Chromium and
+  // Firefox both speak Opus-in-WebM; Safari needs MP4. If neither is
+  // available, pass undefined and let the browser pick its default.
+  function pickMimeType(): string | undefined {
+    if (typeof MediaRecorder === 'undefined') return undefined;
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+    for (const c of candidates) {
+      try {
+        if ((MediaRecorder as any).isTypeSupported && (MediaRecorder as any).isTypeSupported(c)) {
+          return c;
+        }
+      } catch { /* ignore */ }
+    }
+    return undefined;
+  }
+
+  // Stop tracks + clear refs. Idempotent so we can call it from anywhere
+  // without worrying about double-cleanup.
+  function teardownRecording() {
+    try { recorderRef.current?.stream.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ }
+    try { recStreamRef.current?.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ }
+    recorderRef.current = null;
+    recStreamRef.current = null;
+    recChunksRef.current = [];
+  }
+
+  // Insert the transcript at the textarea cursor (or end if no caret).
+  // Keeps focus + moves the caret to the end of the inserted text.
+  function appendTranscript(text: string) {
+    const ta = inputRef.current;
+    if (!ta) {
+      setDraft((prev) => (prev ? prev + ' ' : '') + text);
+      return;
+    }
+    const start = ta.selectionStart ?? ta.value.length;
+    const end = ta.selectionEnd ?? ta.value.length;
+    const before = draft.slice(0, start);
+    const after = draft.slice(end);
+    // Insert with a single space if we're appending into an existing
+    // non-empty word; otherwise paste verbatim.
+    const needsSpace = before && !/\s$/.test(before) ? ' ' : '';
+    const inserted = needsSpace + text;
+    const next = before + inserted + after;
+    setDraft(next);
+    // After Preact applies the new value, restore focus + caret.
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      const caret = before.length + inserted.length;
+      try { el.setSelectionRange(caret, caret); } catch { /* ignore */ }
+    });
+  }
+
+  async function startRecording() {
+    if (!micSupported) return;
+    if (micDenied) {
+      pushToast({
+        tone: 'warn',
+        title: 'Mic permission denied',
+        description: 'Enable in browser settings, then refresh.',
+      });
+      return;
+    }
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err: any) {
+      const denied = err?.name === 'NotAllowedError' || err?.name === 'SecurityError';
+      if (denied) setMicDenied(true);
+      pushToast({
+        tone: 'warn',
+        title: denied ? 'Mic permission denied' : 'Mic unavailable',
+        description: denied ? 'Enable in browser settings, then refresh.' : (err?.message || ''),
+      });
+      return;
+    }
+    const mimeType = pickMimeType();
+    let recorder: MediaRecorder;
+    try {
+      recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+    } catch (err: any) {
+      stream.getTracks().forEach((t) => t.stop());
+      pushToast({ tone: 'error', title: 'Recorder failed to start', description: err?.message || '' });
+      return;
+    }
+    recChunksRef.current = [];
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) recChunksRef.current.push(e.data);
+    };
+    recorder.onstop = () => {
+      const chunks = recChunksRef.current;
+      const blobType = recorder.mimeType || mimeType || 'audio/webm';
+      const blob = new Blob(chunks, { type: blobType });
+      teardownRecording();
+      void uploadAndTranscribe(blob);
+    };
+    recorderRef.current = recorder;
+    recStreamRef.current = stream;
+    recorder.start();
+    setRecState('recording');
+  }
+
+  function stopRecording() {
+    const r = recorderRef.current;
+    if (!r) {
+      setRecState('idle');
+      teardownRecording();
+      return;
+    }
+    setRecState('transcribing');
+    try {
+      r.stop();
+    } catch {
+      teardownRecording();
+      setRecState('idle');
+    }
+  }
+
+  async function uploadAndTranscribe(blob: Blob) {
+    if (!blob || blob.size === 0) {
+      setRecState('idle');
+      pushToast({ tone: 'warn', title: 'No audio captured' });
+      return;
+    }
+    const ext = blob.type.includes('mp4') ? 'm4a' : blob.type.includes('webm') ? 'webm' : 'audio';
+    const form = new FormData();
+    form.append('file', blob, `voice-note.${ext}`);
+    try {
+      const res = await apiUpload<{ text: string }>('/api/transcribe', form);
+      const text = (res.text || '').trim();
+      if (text) appendTranscript(text);
+      else pushToast({ tone: 'warn', title: 'No speech detected' });
+    } catch (err: any) {
+      pushToast({
+        tone: 'error',
+        title: 'Transcription failed',
+        description: err?.message || String(err),
+      });
+    } finally {
+      setRecState('idle');
+    }
+  }
+
+  function toggleMic() {
+    if (recState === 'idle') void startRecording();
+    else if (recState === 'recording') stopRecording();
+    // 'transcribing' is a no-op — the request is in flight.
+  }
+
+  // Cleanup on unmount: kill any active mic stream so we don't leave
+  // the tab's recording indicator on after the user navigates away.
+  useEffect(() => {
+    return () => { teardownRecording(); };
+  }, []);
+
   const agentList = agents.data?.agents ?? [];
   const activeAgentObj = agentList.find((a) => a.id === activeAgent);
   const todayCost = activeAgent === 'all'
@@ -241,6 +419,40 @@ export function Chat() {
               rows={1}
               class="flex-1 bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[var(--color-accent)] resize-none max-h-32"
             />
+            {micSupported && (
+              <button
+                type="button"
+                onClick={toggleMic}
+                disabled={recState === 'transcribing' || sending}
+                aria-label={
+                  recState === 'recording' ? 'Stop recording' :
+                  recState === 'transcribing' ? 'Transcribing' :
+                  'Start voice note'
+                }
+                title={
+                  recState === 'recording' ? 'Stop recording' :
+                  recState === 'transcribing' ? 'Transcribing…' :
+                  'Voice note'
+                }
+                class={[
+                  'inline-flex items-center justify-center rounded-lg transition-colors',
+                  // 44x44 touch target on mobile, slightly tighter on desktop
+                  'min-w-[44px] min-h-[44px] sm:min-w-[40px] sm:min-h-[40px] px-2',
+                  recState === 'recording'
+                    ? 'bg-[var(--color-status-failed)] text-white ring-2 ring-[var(--color-status-failed)]/40 animate-pulse'
+                    : recState === 'transcribing'
+                      ? 'bg-[var(--color-elevated)] text-[var(--color-text-muted)] border border-[var(--color-border)]'
+                      : 'bg-[var(--color-elevated)] text-[var(--color-text)] border border-[var(--color-border)] hover:bg-[var(--color-card)]',
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
+                ].join(' ')}
+              >
+                {recState === 'transcribing' ? (
+                  <Sparkles size={14} class="animate-pulse" />
+                ) : (
+                  <Mic size={14} fill={recState === 'recording' ? 'currentColor' : 'none'} />
+                )}
+              </button>
+            )}
             {processing ? (
               <button
                 type="button"

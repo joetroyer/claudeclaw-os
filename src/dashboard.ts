@@ -5,7 +5,7 @@ import { serve } from '@hono/node-server';
 
 import fs from 'fs';
 import path from 'path';
-import { AGENT_ID, ALLOWED_CHAT_ID, DASHBOARD_PORT, DASHBOARD_TOKEN, DASHBOARD_URL, PROJECT_ROOT, STORE_DIR, WHATSAPP_ENABLED, SLACK_USER_TOKEN, CONTEXT_LIMIT, agentDefaultModel, CLAUDECLAW_CONFIG } from './config.js';
+import { AGENT_ID, ALLOWED_CHAT_ID, DASHBOARD_PORT, DASHBOARD_TOKEN, DASHBOARD_URL, PROJECT_ROOT, STORE_DIR, WHATSAPP_ENABLED, SLACK_USER_TOKEN, CONTEXT_LIMIT, agentDefaultModel, CLAUDECLAW_CONFIG, GROQ_API_KEY } from './config.js';
 import crypto from 'crypto';
 import {
   getAllScheduledTasks,
@@ -1753,6 +1753,81 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     }
     const result = await runMeetCli(['leave', '--session-id', sessionId], 45_000);
     return c.json(result.data, result.ok ? 200 : 500);
+  });
+
+  // POST /api/transcribe — voice note STT for the /chat composer.
+  //
+  // Asymmetric voice: user records audio in the browser, we forward the
+  // blob to Groq's Whisper Large v3 Turbo (cheapest + fastest tier good
+  // enough for short voice notes), and return plain text. The frontend
+  // pastes the result into the composer for the user to review/edit
+  // before sending. No TTS reply path lives here — that's intentional.
+  //
+  // Auth: same `/api/*` token gate as the rest of the dashboard.
+  // Size guard: 24 MB to stay under Groq's 25 MB hard limit with margin.
+  // Audio passes through verbatim; we don't transcode server-side.
+  app.post('/api/transcribe', async (c) => {
+    // Read GROQ_API_KEY at request time (not import time) so tests can
+    // stub it via process.env without rebuilding the config module.
+    const apiKey = process.env.GROQ_API_KEY || GROQ_API_KEY;
+    if (!apiKey) {
+      return c.json({ error: 'GROQ_API_KEY not configured' }, 500);
+    }
+
+    let file: File | null = null;
+    try {
+      const form = await c.req.formData();
+      const f = form.get('file');
+      if (!f || typeof f === 'string') {
+        return c.json({ error: 'missing "file" field' }, 400);
+      }
+      file = f as File;
+    } catch {
+      return c.json({ error: 'failed to read multipart body' }, 400);
+    }
+
+    // Size guard before we read the bytes into memory. Groq's hard limit
+    // is 25 MB; we reject at 24 MB so a slightly racey browser upload
+    // doesn't sail past us only to bounce off the upstream.
+    const MAX_BYTES = 24 * 1024 * 1024;
+    if (file.size > MAX_BYTES) {
+      return c.json({ error: 'audio too large (max 24 MB)' }, 413);
+    }
+
+    // Forward to Groq. Use a fresh FormData so the model + format fields
+    // ride along with the original file bytes (no re-encode).
+    const upstream = new FormData();
+    upstream.append('file', file, file.name || 'audio.webm');
+    upstream.append('model', 'whisper-large-v3-turbo');
+    upstream.append('response_format', 'text');
+
+    let groqRes: Response;
+    try {
+      groqRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: upstream,
+      });
+    } catch (err) {
+      logger.error({ err: err instanceof Error ? err.message : err }, 'Groq transcription network failure');
+      return c.json({ error: 'transcription upstream unreachable' }, 502);
+    }
+
+    if (!groqRes.ok) {
+      const upstreamMsg = await groqRes.text().catch(() => '');
+      logger.warn(
+        { status: groqRes.status, upstream: upstreamMsg.slice(0, 200) },
+        'Groq transcription error',
+      );
+      return c.json(
+        { error: upstreamMsg || `upstream ${groqRes.status}` },
+        502,
+      );
+    }
+
+    // response_format=text returns the bare transcript as plain text.
+    const text = (await groqRes.text()).trim();
+    return c.json({ text });
   });
 
   // Memory stats

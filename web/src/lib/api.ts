@@ -91,6 +91,20 @@ export async function apiDelete<T = unknown>(path: string): Promise<T> {
   return res.json();
 }
 
+// Multipart upload helper. Don't set Content-Type by hand — the browser
+// must add the boundary parameter for FormData.
+export async function apiUpload<T = unknown>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(withToken(path), {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, body, `POST ${path} failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 export function tokenizedSseUrl(path: string): string {
   return withToken(path);
 }

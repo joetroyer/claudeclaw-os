@@ -8,6 +8,7 @@ import { Modal } from '@/components/Modal';
 import { ModelPicker } from '@/components/ModelPicker';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { AgentDetail } from '@/components/AgentDetail';
+import { ChatWithAgentButton } from '@/components/ChatWithAgentButton';
 import { AgentSuggestionBadge, AgentSuggestionModal, useAgentSuggestions, type AgentSuggestion } from '@/components/AgentSuggestions';
 import { useFetch } from '@/lib/useFetch';
 import { useDebouncedValue } from '@/lib/useDebounce';
@@ -280,6 +281,11 @@ function AgentCard({ agent, onChange, onOpen, suggestions, onOpenSuggestion }: {
             {agent.id}
           </div>
         </div>
+        {/* Stop the card click handler: chat-with-agent should never
+            open the agent detail drawer behind it. */}
+        <span onClick={(e) => e.stopPropagation()}>
+          <ChatWithAgentButton agentId={agent.id} agentName={agent.name} size={16} variant="card" />
+        </span>
       </div>
 
       {agent.description && (

@@ -8,6 +8,7 @@ import { ConfirmModal } from '@/components/ConfirmModal';
 import { EditTaskModal } from '@/components/EditTaskModal';
 import { Modal } from '@/components/Modal';
 import { ScheduleBuilder } from '@/components/ScheduleBuilder';
+import { ChatWithAgentButton } from '@/components/ChatWithAgentButton';
 import { useFetch } from '@/lib/useFetch';
 import { apiPost, apiDelete } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
@@ -371,6 +372,11 @@ function TaskCard({ task, blurOn, selected, onToggleSelect, onAction, onDeleteRe
               </span>
             ) : null}
             {task.agent_id !== 'main' && <span class="font-mono">@{task.agent_id}</span>}
+            {task.agent_id && (
+              <span onClick={(e) => e.stopPropagation()}>
+                <ChatWithAgentButton agentId={task.agent_id} size={14} />
+              </span>
+            )}
           </div>
           <div class="mt-1.5" data-testid="health-summary">
             <HealthSummary task={task} />
@@ -453,7 +459,12 @@ function TaskListRow({ task, blurOn, selected, onToggleSelect, onAction, onDelet
         </div>
       </td>
       <td class="px-3 py-2.5 font-mono text-[11px] text-[var(--color-text-muted)] whitespace-nowrap">
-        @{task.agent_id}
+        <span class="inline-flex items-center gap-1">
+          @{task.agent_id}
+          <span onClick={(e) => e.stopPropagation()}>
+            <ChatWithAgentButton agentId={task.agent_id} size={14} />
+          </span>
+        </span>
       </td>
       <td class="px-3 py-2.5 text-right whitespace-nowrap">
         <RowActions task={task} onAction={onAction} onDeleteRequest={onDeleteRequest} />

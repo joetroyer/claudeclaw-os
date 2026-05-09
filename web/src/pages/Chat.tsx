@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { useLocation } from 'wouter-preact';
 import { Send, Square, Sparkles, ArrowDown } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { PageState } from '@/components/PageState';
@@ -25,8 +26,26 @@ const QUICK_ACTIONS = [
 ];
 
 export function Chat() {
+  const [location, navigate] = useLocation();
   const agents = useFetch<{ agents: Agent[] }>('/api/agents', 60_000);
-  const [activeAgent, setActiveAgent] = useState<string>('all');
+  // Read ?agent=<id> on mount (and when the URL changes via in-app links)
+  // so deep links from other pages preselect the right agent thread. The
+  // query param is stripped after consumption to keep the URL tidy and
+  // prevent it from clobbering manual tab switches on later renders.
+  const [activeAgent, setActiveAgent] = useState<string>(() => {
+    if (typeof window === 'undefined') return 'all';
+    const param = new URL(window.location.href).searchParams.get('agent');
+    return param ? param : 'all';
+  });
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const param = url.searchParams.get('agent');
+    if (!param) return;
+    setActiveAgent(param);
+    url.searchParams.delete('agent');
+    navigate(url.pathname + (url.search ? url.search : ''));
+  }, [location]);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
